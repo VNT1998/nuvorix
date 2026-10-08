@@ -31,17 +31,25 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
 @router.get("/ready", response_model=ReadyResponse)
 async def readiness_check(db: AsyncSession = Depends(get_db)):
+    import os
+
     db_ok = True
     try:
         await db.execute(text("SELECT 1"))
     except Exception:
         db_ok = False
 
+    storage_ok = os.path.exists(settings.ARTIFACT_STORE_PATH) and os.access(
+        settings.ARTIFACT_STORE_PATH, os.W_OK
+    )
+
+    is_ready = db_ok and storage_ok
+
     return ReadyResponse(
-        ready=db_ok,
+        ready=is_ready,
         dependencies={
             "database": "connected" if db_ok else "disconnected",
-            "artifact_store": "ready",
+            "artifact_store": "ready" if storage_ok else "unreachable_or_readonly",
             "telemetry": "active",
         },
     )

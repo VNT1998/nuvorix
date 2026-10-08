@@ -8,7 +8,7 @@ from apps.api.app.main import app
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as ac:
         yield ac
 
 

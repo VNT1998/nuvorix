@@ -1,4 +1,5 @@
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -48,26 +49,33 @@ app.add_middleware(
 )
 
 
-# HTTP Request Metrics & OpenTelemetry Tracing Middleware
+# HTTP Request Metrics, OpenTelemetry Tracing & Request ID Middleware
 @app.middleware("http")
 async def telemetry_middleware(request: Request, call_next):
-    start_time = time.time()
-    
+    # 1. Request ID Correlation (reuse incoming header or generate new UUID)
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
     # Avoid recording /metrics or /telemetry/traces to avoid recursive trace generation
     if request.url.path in ("/metrics", "/telemetry/traces"):
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
+    start_time = time.time()
     from apps.api.app.core.telemetry import tracer
 
     with tracer.start_as_current_span(f"{request.method} {request.url.path}") as span:
         span.set_attribute("http.method", request.method)
         span.set_attribute("http.url", str(request.url))
         span.set_attribute("http.route", request.url.path)
+        span.set_attribute("app.request_id", request_id)
 
         response = await call_next(request)
         duration = time.time() - start_time
 
         span.set_attribute("http.status_code", response.status_code)
+        response.headers["X-Request-ID"] = request_id
         record_http_request(
             method=request.method,
             endpoint=request.url.path,

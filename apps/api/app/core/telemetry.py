@@ -1,3 +1,4 @@
+import logging
 import threading
 from collections import deque
 from collections.abc import Sequence
@@ -9,6 +10,8 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
+
+logger = logging.getLogger(__name__)
 
 # --- OpenTelemetry Tracing Infrastructure ---
 
@@ -48,17 +51,33 @@ class RingBufferSpanExporter(SpanExporter):
         pass
 
 
+from apps.api.app.core.config import settings
+
 _resource = Resource.create({
     "service.name": "nuvorix-control-plane",
-    "service.version": "0.1.0",
-    "deployment.environment": "development",
+    "service.version": settings.VERSION,
+    "deployment.environment": settings.ENVIRONMENT,
 })
 _provider = TracerProvider(resource=_resource)
 _span_exporter = RingBufferSpanExporter(maxlen=200)
 _provider.add_span_processor(SimpleSpanProcessor(_span_exporter))
+
+if settings.OTEL_ENABLED and settings.OTEL_EXPORTER_OTLP_ENDPOINT:
+    try:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        otlp_endpoint = settings.OTEL_EXPORTER_OTLP_ENDPOINT.rstrip("/")
+        if not otlp_endpoint.endswith("/v1/traces"):
+            otlp_endpoint = f"{otlp_endpoint}/v1/traces"
+        _otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+        _provider.add_span_processor(BatchSpanProcessor(_otlp_exporter))
+    except Exception as exc:
+        logger.debug("OTLP exporter initialization skipped: %s", exc)
+
 trace.set_tracer_provider(_provider)
 
-tracer: trace.Tracer = trace.get_tracer("nuvorix-control-plane", "0.1.0")
+tracer: trace.Tracer = trace.get_tracer("nuvorix-control-plane", settings.VERSION)
 
 
 def get_tracer() -> trace.Tracer:
