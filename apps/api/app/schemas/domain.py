@@ -146,6 +146,7 @@ class RetrievalChunk(BaseModel):
     chunk_id: str
     document_id: str
     score: float
+    distance: float = 0.0
     source: str
     title: str
     text: str

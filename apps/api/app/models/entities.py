@@ -9,6 +9,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
 )
@@ -34,13 +35,14 @@ class Organization(Base):
 
     users: Mapped[list["User"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     projects: Mapped[list["Project"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    api_keys: Mapped[list["APIKey"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
 
 
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    organization_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(64), nullable=False, default="viewer")
@@ -49,11 +51,41 @@ class User(Base):
     organization: Mapped["Organization"] = relationship(back_populates="users")
 
 
+class APIKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
+    organization_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    key_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[str] = mapped_column(String(64), nullable=False, default="developer")
+    scopes_json: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    organization: Mapped["Organization"] = relationship(back_populates="api_keys")
+
+
+class IdempotencyKey(Base):
+    __tablename__ = "idempotency_keys"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
+    key: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    endpoint: Mapped[str] = mapped_column(String(255), nullable=False)
+    response_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    organization_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -70,7 +102,7 @@ class Environment(Base):
     __tablename__ = "environments"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(64), nullable=False)  # dev, staging, production
     type: Mapped[str] = mapped_column(String(64), nullable=False, default="staging")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -82,7 +114,7 @@ class Workload(Base):
     __tablename__ = "workloads"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     type: Mapped[str] = mapped_column(String(64), nullable=False)  # ml_model, rag, agent, llm_service
     status: Mapped[str] = mapped_column(String(64), default="healthy")  # healthy, degraded, deploying, error
@@ -100,7 +132,7 @@ class Model(Base):
     __tablename__ = "models"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    workload_id: Mapped[str] = mapped_column(String(64), ForeignKey("workloads.id"), nullable=False)
+    workload_id: Mapped[str] = mapped_column(String(64), ForeignKey("workloads.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     framework: Mapped[str] = mapped_column(String(64), default="scikit-learn")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -113,7 +145,7 @@ class ModelVersion(Base):
     __tablename__ = "model_versions"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    model_id: Mapped[str] = mapped_column(String(64), ForeignKey("models.id"), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(64), ForeignKey("models.id"), nullable=False, index=True)
     version: Mapped[str] = mapped_column(String(64), nullable=False)  # e.g. v1.0.0
     artifact_uri: Mapped[str] = mapped_column(String(512), nullable=False)
     metrics_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -128,7 +160,7 @@ class Dataset(Base):
     __tablename__ = "datasets"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     version: Mapped[str] = mapped_column(String(64), default="v1.0.0")
     uri: Mapped[str] = mapped_column(String(512), default="")
@@ -142,7 +174,7 @@ class EvaluationRun(Base):
     __tablename__ = "evaluation_runs"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    workload_id: Mapped[str] = mapped_column(String(64), ForeignKey("workloads.id"), nullable=False)
+    workload_id: Mapped[str] = mapped_column(String(64), ForeignKey("workloads.id"), nullable=False, index=True)
     version: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(64), default="completed")  # running, completed, failed
     metrics_json: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -159,11 +191,11 @@ class Deployment(Base):
     __tablename__ = "deployments"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    workload_id: Mapped[str] = mapped_column(String(64), ForeignKey("workloads.id"), nullable=False)
+    workload_id: Mapped[str] = mapped_column(String(64), ForeignKey("workloads.id"), nullable=False, index=True)
     version: Mapped[str] = mapped_column(String(64), nullable=False)
     environment: Mapped[str] = mapped_column(String(64), default="staging")  # dev, staging, production
     strategy: Mapped[str] = mapped_column(String(64), default="blue_green")  # direct, blue_green, canary
-    status: Mapped[str] = mapped_column(String(64), default="active")  # candidate, active, rolled_back, failed
+    status: Mapped[str] = mapped_column(String(64), default="active")  # candidate, active, retired, rolled_back, failed, circuit_open
     traffic_percentage: Mapped[int] = mapped_column(Integer, default=100)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -174,7 +206,8 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False, index=True)
+    deployment_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("deployments.id"), nullable=True, index=True)
     severity: Mapped[str] = mapped_column(String(32), default="HIGH")  # LOW, MEDIUM, HIGH, CRITICAL
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(64), default="open")  # open, investigating, remediated, resolved
@@ -192,11 +225,16 @@ class AuditEvent(Base):
     __tablename__ = "audit_events"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    organization_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     action: Mapped[str] = mapped_column(String(128), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    resource_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    actor_type: Mapped[str] = mapped_column(String(32), default="user")  # user, api_key, system, agent
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    before_state_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    after_state_json: Mapped[dict] = mapped_column(JSON, default=dict)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -205,7 +243,7 @@ class KnowledgeBase(Base):
     __tablename__ = "knowledge_bases"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     embedding_model: Mapped[str] = mapped_column(String(128), default="BAAI/bge-small-en-v1.5")
@@ -220,7 +258,7 @@ class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    knowledge_base_id: Mapped[str] = mapped_column(String(64), ForeignKey("knowledge_bases.id"), nullable=False)
+    knowledge_base_id: Mapped[str] = mapped_column(String(64), ForeignKey("knowledge_bases.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     source_uri: Mapped[str] = mapped_column(String(512), default="")
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -235,8 +273,8 @@ class KnowledgeChunk(Base):
     __tablename__ = "knowledge_chunks"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    document_id: Mapped[str] = mapped_column(String(64), ForeignKey("knowledge_documents.id"), nullable=False)
-    knowledge_base_id: Mapped[str] = mapped_column(String(64), ForeignKey("knowledge_bases.id"), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(64), ForeignKey("knowledge_documents.id"), nullable=False, index=True)
+    knowledge_base_id: Mapped[str] = mapped_column(String(64), ForeignKey("knowledge_bases.id"), nullable=False, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)  # native pgvector column
@@ -252,7 +290,7 @@ class LLMUsageLog(Base):
     __tablename__ = "llm_usage_logs"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    workload_id: Mapped[str] = mapped_column(String(64), ForeignKey("workloads.id"), nullable=False)
+    workload_id: Mapped[str] = mapped_column(String(64), ForeignKey("workloads.id"), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)  # openai, anthropic, gemini, local
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, default="")
@@ -260,7 +298,9 @@ class LLMUsageLog(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
-    estimated_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    estimated_cost: Mapped[float] = mapped_column(Numeric(12, 6, asdecimal=False), default=0.0)
+    cost_mode: Mapped[str] = mapped_column(String(32), default="estimated_local")  # provider_reported, estimated_local
+    usage_source: Mapped[str] = mapped_column(String(32), default="estimated")  # provider, estimated
     status: Mapped[str] = mapped_column(String(32), default="success")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 

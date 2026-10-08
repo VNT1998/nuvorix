@@ -1,8 +1,10 @@
 import datetime
+import os
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.app.core.config import settings
 from apps.api.app.models.entities import (
     AuditEvent,
     Deployment,
@@ -122,11 +124,20 @@ async def seed_demo_data(db: AsyncSession) -> None:
     db.add(model_entity)
     await db.flush()
 
+    artifact_dir = os.path.join(settings.ARTIFACT_STORE_PATH, w_ml.id, "models")
+    os.makedirs(artifact_dir, exist_ok=True)
+    seeded_artifact_path = os.path.join(artifact_dir, "churn_ridge_regressor_v1.0.0.joblib")
+    if not os.path.exists(seeded_artifact_path):
+        import joblib
+        from sklearn.linear_model import Ridge
+        dummy_regressor = Ridge(alpha=1.0).fit([[1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 3.0, 4.0, 5.0, 6.0]], [10.0, 20.0])
+        joblib.dump(dummy_regressor, seeded_artifact_path)
+
     m_v1 = ModelVersion(
         id="ver-churn-v1",
         model_id=model_entity.id,
         version="v1.0.0",
-        artifact_uri="./artifacts/w-churn-predictor/models/churn_ridge_regressor_v1.0.0.joblib",
+        artifact_uri=seeded_artifact_path,
         metrics_json={"rmse": 0.412, "mae": 0.305, "r2_score": 0.941, "accuracy": 0.932},
         parameters_json={"alpha": 1.0, "max_iter": 1000, "algorithm": "Ridge"},
         status="production",
@@ -257,6 +268,7 @@ The rollback shifts 100% of traffic back to the previous stable active deploymen
     incident = Incident(
         id="inc-142",
         project_id=project.id,
+        deployment_id=dep1.id,
         severity="HIGH",
         title="Retrieval Latency Regression in Support Agent",
         status="open",
