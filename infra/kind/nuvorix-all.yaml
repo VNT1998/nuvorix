@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nuvorix
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nuvorix-config
+  namespace: nuvorix
+data:
+  DATABASE_URL: "postgresql+asyncpg://nuvorix:nuvorix_password@postgres.nuvorix.svc.cluster.local:5432/nuvorix"
+  REDIS_URL: "redis://redis.nuvorix.svc.cluster.local:6379/0"
+  PROMETHEUS_ENABLED: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: nuvorix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          env:
+            - name: POSTGRES_USER
+              value: nuvorix
+            - name: POSTGRES_PASSWORD
+              value: nuvorix_password
+            - name: POSTGRES_DB
+              value: nuvorix
+          ports:
+            - containerPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: nuvorix
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nuvorix-api
+  namespace: nuvorix
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nuvorix-api
+  template:
+    metadata:
+      labels:
+        app: nuvorix-api
+    spec:
+      containers:
+        - name: nuvorix-api
+          image: nuvorix-api:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: nuvorix-config
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nuvorix-api
+  namespace: nuvorix
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: nuvorix-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nuvorix-web
+  namespace: nuvorix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nuvorix-web
+  template:
+    metadata:
+      labels:
+        app: nuvorix-web
+    spec:
+      containers:
+        - name: nuvorix-web
+          image: nuvorix-web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nuvorix-web
+  namespace: nuvorix
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+  selector:
+    app: nuvorix-web

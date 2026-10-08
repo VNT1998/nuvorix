@@ -1,0 +1,51 @@
+services:
+  nuvorix-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://nuvorix:nuvorix_password@postgres:5432/nuvorix
+      - REDIS_URL=redis://redis:6379/0
+      - PROMETHEUS_ENABLED=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./artifacts:/app/artifacts
+
+  nuvorix-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - nuvorix-api
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: nuvorix
+      POSTGRES_PASSWORD: nuvorix_password
+      POSTGRES_DB: nuvorix
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nuvorix -d nuvorix"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
