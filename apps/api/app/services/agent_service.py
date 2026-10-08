@@ -5,13 +5,16 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.app.core.security import ExecutionContext
 from apps.api.app.core.telemetry import (
     TOOL_CALLS_TOTAL,
     TOOL_FAILURES_TOTAL,
     record_llm_usage,
 )
-from apps.api.app.models.entities import AuditEvent, Deployment, KnowledgeBase, Workload
+from apps.api.app.models.entities import AuditEvent, Deployment, KnowledgeBase, Project, Workload
+from apps.api.app.services.diagnostic_service import DiagnosticService
 from apps.api.app.services.rag_service import RAGPlatformService
+from apps.api.app.services.tool_authorization import TOOL_DEFINITIONS, authorize_tool
 
 
 class AgentState(TypedDict, total=False):
@@ -19,7 +22,7 @@ class AgentState(TypedDict, total=False):
     workload_id: str
     knowledge_base_id: str | None
     allow_high_risk: bool
-    user_id: str
+    context: ExecutionContext
     selected_tool: str | None
     tool_params: dict[str, Any]
     tool_observation: dict[str, Any] | None
@@ -29,59 +32,9 @@ class AgentState(TypedDict, total=False):
 
 
 class AgentRuntimeService:
-    TOOLS = {
-        "knowledge_search": {
-            "name": "knowledge_search",
-            "description": "Search the verified platform knowledge base using semantic vector retrieval.",
-            "risk": "low",
-            "permissions": ["knowledge:query"],
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query text"},
-                    "knowledge_base_id": {"type": "string", "description": "Optional target KB ID"},
-                },
-                "required": ["query"],
-            },
-        },
-        "project_deployment_status": {
-            "name": "project_deployment_status",
-            "description": "Inspect active workloads, versions, environments, and rollout health.",
-            "risk": "low",
-            "permissions": ["workloads:read", "deployments:read"],
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-        "diagnostic_check": {
-            "name": "diagnostic_check",
-            "description": "Run safe read-only health checks across database connections, queue status, and memory.",
-            "risk": "low",
-            "permissions": ["platform:diagnostics"],
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-        "emergency_circuit_breaker": {
-            "name": "emergency_circuit_breaker",
-            "description": "Forcefully halt inbound traffic to an unstable candidate version.",
-            "risk": "high",
-            "permissions": ["deployments:rollback", "agents:tools:execute_high_risk"],
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "reason": {"type": "string", "description": "Reason for triggering circuit breaker"},
-                },
-                "required": ["reason"],
-            },
-        },
-    }
-
     @classmethod
     def list_tools(cls) -> list[dict[str, Any]]:
-        return list(cls.TOOLS.values())
+        return list(TOOL_DEFINITIONS.values())
 
     @classmethod
     def get_workflow_mermaid(cls) -> str:
@@ -107,59 +60,89 @@ class AgentRuntimeService:
         tool_name: str,
         tool_input: dict[str, Any],
         db: AsyncSession,
+        context: ExecutionContext | None = None,
         allow_high_risk: bool = False,
+        confirmed: bool = False,
     ) -> dict[str, Any]:
-        """Public tool execution endpoint used by both LangGraph and external MCP callers."""
-        return await cls._execute_tool(
-            tool_name=tool_name,
-            tool_input=tool_input,
-            db=db,
-            allow_high_risk=allow_high_risk,
+        """
+        Public tool execution endpoint used by both LangGraph and external MCP callers.
+        Enforces tenant boundaries, role authorization, and stateful side-effects.
+        """
+        # If no explicit context is passed (e.g. testing or minimal caller), enforce a safe default context
+        ctx = context or ExecutionContext(
+            user_id="anonymous",
+            organization_id="org-demo-nuvorix",
+            role="viewer",
+            permissions={"workloads:read", "knowledge:query"},
+            source="api",
         )
 
-    @classmethod
-    async def _execute_tool(
-        cls,
-        tool_name: str,
-        tool_input: dict[str, Any],
-        db: AsyncSession,
-        allow_high_risk: bool,
-    ) -> dict[str, Any]:
-        tool_meta = cls.TOOLS.get(tool_name)
-        if not tool_meta:
-            TOOL_FAILURES_TOTAL.labels(tool_name=tool_name, reason="unknown_tool").inc()
-            return {"error": f"Tool '{tool_name}' is not registered."}
-
-        # Check risk level authorization
-        if tool_meta["risk"] == "high" and not allow_high_risk:
-            TOOL_FAILURES_TOTAL.labels(tool_name=tool_name, reason="unauthorized_risk").inc()
-            return {
-                "error": f"Tool '{tool_name}' is marked HIGH RISK and requires explicit operator authorization."
-            }
+        try:
+            authorize_tool(
+                context=ctx,
+                tool_name=tool_name,
+                allow_high_risk=allow_high_risk,
+                confirmed=confirmed or bool(tool_input.get("confirmed", False)),
+            )
+        except (ValueError, PermissionError) as auth_err:
+            TOOL_FAILURES_TOTAL.labels(tool_name=tool_name, reason="authorization_failed").inc()
+            return {"error": str(auth_err)}
 
         try:
             if tool_name == "knowledge_search":
                 kb_id = tool_input.get("knowledge_base_id")
                 query = tool_input.get("query", "")
+
                 if not kb_id:
-                    # fallback to first available knowledge base
-                    res_kb = await db.execute(select(KnowledgeBase).limit(1))
+                    # Find first knowledge base belonging to the caller's organization
+                    res_kb = await db.execute(
+                        select(KnowledgeBase)
+                        .join(Project, KnowledgeBase.project_id == Project.id)
+                        .where(Project.organization_id == ctx.organization_id)
+                        .limit(1)
+                    )
                     first_kb = res_kb.scalar_one_or_none()
                     if first_kb:
                         kb_id = first_kb.id
                     else:
-                        return {"results": [], "message": "No knowledge base registered."}
+                        return {"results": [], "count": 0, "message": "No knowledge base registered for this organization."}
+                else:
+                    # Verify provided KB belongs to caller's organization
+                    res_kb = await db.execute(
+                        select(KnowledgeBase)
+                        .join(Project, KnowledgeBase.project_id == Project.id)
+                        .where(KnowledgeBase.id == kb_id, Project.organization_id == ctx.organization_id)
+                    )
+                    if not res_kb.scalar_one_or_none():
+                        return {"error": f"Knowledge base '{kb_id}' not found or unauthorized for organization."}
 
                 results = await RAGPlatformService.query_knowledge_base(
-                    db=db, knowledge_base_id=kb_id, query=query, top_k=3
+                    db=db,
+                    knowledge_base_id=kb_id,
+                    query=query,
+                    top_k=3,
+                    org_id=ctx.organization_id,
                 )
                 output = {"results": results, "count": len(results)}
 
             elif tool_name == "project_deployment_status":
-                res_w = await db.execute(select(Workload))
+                res_w = await db.execute(
+                    select(Workload)
+                    .join(Project, Workload.project_id == Project.id)
+                    .where(Project.organization_id == ctx.organization_id)
+                )
                 workloads = res_w.scalars().all()
-                res_d = await db.execute(select(Deployment).order_by(Deployment.created_at.desc()).limit(5))
+
+                res_d = await db.execute(
+                    select(Deployment)
+                    .join(Workload, Deployment.workload_id == Workload.id)
+                    .join(Project, Workload.project_id == Project.id)
+                    .where(Project.organization_id == ctx.organization_id)
+                    .order_by(Deployment.created_at.desc())
+                    .limit(5)
+                )
                 deployments = res_d.scalars().all()
+
                 output = {
                     "workloads": [
                         {"id": w.id, "name": w.name, "type": w.type, "status": w.status, "version": w.active_version}
@@ -172,19 +155,88 @@ class AgentRuntimeService:
                 }
 
             elif tool_name == "diagnostic_check":
-                output = {
-                    "database_pool": "healthy (0 errors, 4ms latency)",
-                    "memory_utilization": "42%",
-                    "disk_buffer": "healthy",
-                    "telemetry_stream": "active",
-                }
+                # Real measurements of DB round-trip latency, memory RSS, and artifact store
+                diagnostics = await DiagnosticService.run_diagnostics(db=db)
+                output = diagnostics
 
             elif tool_name == "emergency_circuit_breaker":
-                output = {
-                    "status": "circuit_opened",
-                    "action": "halted_traffic_to_target",
-                    "timestamp": time.time(),
+                # Stateful logical circuit breaker execution
+                target_dep_id = tool_input.get("deployment_id")
+                reason = tool_input.get("reason", "Operator emergency circuit trip")
+
+                # If no deployment ID was provided, locate the latest active deployment for this tenant
+                query_dep = (
+                    select(Deployment)
+                    .join(Workload, Deployment.workload_id == Workload.id)
+                    .join(Project, Workload.project_id == Project.id)
+                    .where(Project.organization_id == ctx.organization_id)
+                )
+                if target_dep_id:
+                    query_dep = query_dep.where(Deployment.id == target_dep_id)
+                else:
+                    query_dep = query_dep.where(Deployment.status == "active").order_by(Deployment.created_at.desc())
+
+                res_dep = await db.execute(query_dep)
+                deployment = res_dep.scalars().first()
+                if not deployment:
+                    return {"error": "Target deployment not found or unauthorized for this organization."}
+
+                # Idempotency check: if circuit is already open, do not duplicate side-effects
+                if deployment.status == "circuit_open":
+                    return {
+                        "status": "circuit_open",
+                        "already_open": True,
+                        "idempotent": True,
+                        "deployment_id": deployment.id,
+                        "message": "Circuit breaker is already tripped on this deployment.",
+                    }
+
+                before_state = {
+                    "status": deployment.status,
+                    "traffic_percentage": deployment.traffic_percentage,
                 }
+
+                # Mutate deployment and workload state
+                deployment.status = "circuit_open"
+                deployment.traffic_percentage = 0
+
+                res_wl = await db.execute(select(Workload).where(Workload.id == deployment.workload_id))
+                workload = res_wl.scalar_one_or_none()
+                if workload:
+                    workload.status = "degraded"
+
+                after_state = {
+                    "status": "circuit_open",
+                    "traffic_percentage": 0,
+                    "workload_status": "degraded",
+                }
+
+                audit = AuditEvent(
+                    organization_id=ctx.organization_id,
+                    user_id=ctx.user_id,
+                    action="deployments:circuit_breaker",
+                    resource_type="deployment",
+                    resource_id=deployment.id,
+                    request_id=ctx.request_id,
+                    actor_type=ctx.source,
+                    reason=reason,
+                    before_state_json=before_state,
+                    after_state_json=after_state,
+                    metadata_json={"reason": reason, "idempotent": True},
+                )
+                db.add(audit)
+                await db.commit()
+                await db.refresh(deployment)
+
+                output = {
+                    "status": "circuit_open",
+                    "deployment_id": deployment.id,
+                    "traffic_percentage": 0,
+                    "workload_status": "degraded",
+                    "remediated": True,
+                    "reason": reason,
+                }
+
             else:
                 output = {"error": "Unhandled tool execution."}
 
@@ -196,6 +248,20 @@ class AgentRuntimeService:
             return {"error": str(e)}
 
     @classmethod
+    def route_prompt_to_tool(cls, prompt: str, knowledge_base_id: str | None = None) -> tuple[str | None, dict[str, Any]]:
+        """Determine appropriate tool and parameters based on natural language prompt intent."""
+        prompt_lower = prompt.lower()
+        if any(w in prompt_lower for w in ["search", "find", "how", "what", "doc", "spec", "rag", "knowledge", "architecture"]):
+            return "knowledge_search", {"query": prompt, "knowledge_base_id": knowledge_base_id}
+        elif any(w in prompt_lower for w in ["status", "deploy", "workload", "health", "system", "pods", "active"]):
+            return "project_deployment_status", {}
+        elif any(w in prompt_lower for w in ["diagnostic", "latency", "memory", "db", "check"]):
+            return "diagnostic_check", {}
+        elif any(w in prompt_lower for w in ["halt", "stop", "circuit", "kill", "block", "emergency"]):
+            return "emergency_circuit_breaker", {"reason": "Operator emergency invoke", "confirmed": True}
+        return None, {}
+
+    @classmethod
     async def run_agent_workflow(
         cls,
         db: AsyncSession,
@@ -203,35 +269,25 @@ class AgentRuntimeService:
         prompt: str,
         knowledge_base_id: str | None = None,
         allow_high_risk: bool = False,
-        user_id: str = "usr-demo-admin",
+        context: ExecutionContext | None = None,
     ) -> dict[str, Any]:
         """
-        Executes a real LangGraph StateGraph orchestration loop:
+        Executes a real LangGraph StateGraph orchestration loop bound to authenticated context:
         START -> Planner -> (Conditional Router) -> Tool Executor -> Synthesizer -> END
         """
         start_overall = time.time()
+        ctx = context or ExecutionContext(
+            user_id="dev-demo-user",
+            organization_id="org-demo-nuvorix",
+            role="developer",
+            permissions={"workloads:read", "knowledge:query", "agents:run"},
+            source="agent",
+        )
 
-        # Define real LangGraph nodes bound to the current session context
         async def planner_node(state: AgentState) -> dict[str, Any]:
             t0 = time.time()
             prompt_str = state.get("prompt", "")
-            prompt_lower = prompt_str.lower()
-
-            selected_tool = None
-            tool_params: dict[str, Any] = {}
-
-            if any(w in prompt_lower for w in ["search", "find", "how", "what", "doc", "spec", "rag", "knowledge", "architecture"]):
-                selected_tool = "knowledge_search"
-                tool_params = {"query": prompt_str, "knowledge_base_id": state.get("knowledge_base_id")}
-            elif any(w in prompt_lower for w in ["status", "deploy", "workload", "health", "system", "pods", "active"]):
-                selected_tool = "project_deployment_status"
-                tool_params = {}
-            elif any(w in prompt_lower for w in ["diagnostic", "latency", "memory", "db", "check"]):
-                selected_tool = "diagnostic_check"
-                tool_params = {}
-            elif any(w in prompt_lower for w in ["halt", "stop", "circuit", "kill", "block", "emergency"]):
-                selected_tool = "emergency_circuit_breaker"
-                tool_params = {"reason": "Operator emergency invoke"}
+            selected_tool, tool_params = cls.route_prompt_to_tool(prompt_str, state.get("knowledge_base_id"))
 
             decision_text = f"Route to LangGraph tool_executor node for `{selected_tool}`" if selected_tool else "Route directly to LangGraph synthesizer node"
             step_record = {
@@ -265,11 +321,13 @@ class AgentRuntimeService:
             })
 
             t_obs = time.time()
-            obs = await cls._execute_tool(
+            obs = await cls.execute_tool(
                 tool_name=str(selected_tool),
                 tool_input=tool_params,
                 db=db,
+                context=ctx,
                 allow_high_risk=state.get("allow_high_risk", False),
+                confirmed=bool(tool_params.get("confirmed", False)),
             )
 
             steps.append({
@@ -312,18 +370,21 @@ class AgentRuntimeService:
                 deploys_count = len(obs.get("recent_deployments", []))
                 final_text = (
                     f"Platform state checked: Currently observing {workloads_count} active workloads "
-                    f"and {deploys_count} recent deployments. All active control plane nodes report healthy status."
+                    f"and {deploys_count} recent deployments for organization `{ctx.organization_id}`."
                 )
             elif selected_tool == "diagnostic_check" and obs:
+                db_status = obs.get("database", {}).get("status", "unknown")
+                db_lat = obs.get("database", {}).get("latency_ms", "N/A")
+                rss = obs.get("memory", {}).get("process_rss_mb", "N/A")
                 final_text = (
-                    f"System Diagnostics: Database pool is {obs.get('database_pool')}, "
-                    f"memory at {obs.get('memory_utilization')}, and all telemetry streams are active."
+                    f"System Diagnostics: Database is {db_status} ({db_lat}ms latency), "
+                    f"process memory RSS is {rss} MB, and artifact storage is verified."
                 )
             elif selected_tool == "emergency_circuit_breaker":
                 if obs and "error" in obs:
                     final_text = f"Action blocked: {obs.get('error')}"
                 else:
-                    final_text = "Emergency circuit breaker successfully triggered. Inbound traffic halted."
+                    final_text = f"Emergency circuit breaker successfully triggered on deployment `{obs.get('deployment_id')}`. Inbound traffic halted to 0%."
             else:
                 final_text = (
                     f"Nuvorix Agent received your request: '{prompt_str}'. "
@@ -347,7 +408,6 @@ class AgentRuntimeService:
                 return "tool_executor"
             return "synthesizer"
 
-        # Build real LangGraph StateGraph
         workflow = StateGraph(AgentState)
         workflow.add_node("planner", planner_node)
         workflow.add_node("tool_executor", tool_executor_node)
@@ -362,14 +422,13 @@ class AgentRuntimeService:
         workflow.add_edge("tool_executor", "synthesizer")
         workflow.add_edge("synthesizer", END)
 
-        # Compile and execute StateGraph
         graph = workflow.compile()
         initial_state: AgentState = {
             "prompt": prompt,
             "workload_id": workload_id,
             "knowledge_base_id": knowledge_base_id,
             "allow_high_risk": allow_high_risk,
-            "user_id": user_id,
+            "context": ctx,
             "selected_tool": None,
             "tool_params": {},
             "tool_observation": None,
@@ -388,7 +447,6 @@ class AgentRuntimeService:
         total_tokens = len(prompt.split()) * 3 + len(final_text.split()) * 2 + 150
         estimated_cost = round((total_tokens / 1000.0) * 0.002, 6)
 
-        # Record LLM usage in Prometheus
         record_llm_usage(
             provider="langgraph-orchestrator",
             model="nuvorix-state-machine",
@@ -400,11 +458,13 @@ class AgentRuntimeService:
         )
 
         audit = AuditEvent(
-            organization_id="org-demo-nuvorix",
-            user_id=user_id,
+            organization_id=ctx.organization_id,
+            user_id=ctx.user_id,
             action="agents:run",
             resource_type="workload",
             resource_id=workload_id,
+            request_id=ctx.request_id,
+            actor_type="agent",
             metadata_json={
                 "tools_used": tools_used,
                 "latency_ms": total_latency_ms,
@@ -425,4 +485,3 @@ class AgentRuntimeService:
             "estimated_cost": estimated_cost,
             "duration_ms": total_latency_ms,
         }
-

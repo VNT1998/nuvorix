@@ -58,7 +58,7 @@ async def run_agent(
             prompt=payload.prompt,
             knowledge_base_id=payload.knowledge_base_id,
             allow_high_risk=payload.allow_high_risk_tools,
-            user_id=user.user_id,
+            context=user.to_context(source="agent"),
         )
         return AgentRunResponse(**res)
     except ValueError as e:
@@ -95,7 +95,7 @@ async def list_tools(
             name=t["name"],
             description=t["description"],
             risk=t["risk"],
-            required_permissions=t["permissions"],
+            required_permissions=t["required_permissions"],
             input_schema=t.get("inputSchema", {}),
         )
         for t in tools
@@ -128,7 +128,7 @@ async def mcp_call_tool(
     db: AsyncSession = Depends(get_db),
     user: UserSession = Depends(get_current_user),
 ):
-    """Standard MCP tool call execution."""
+    """Standard MCP tool call execution with strict permission enforcement."""
     if payload.allow_high_risk and not check_permission(user, "agents:tools:execute_high_risk"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -139,6 +139,7 @@ async def mcp_call_tool(
         tool_name=payload.name,
         tool_input=payload.arguments,
         db=db,
+        context=user.to_context(source="mcp"),
         allow_high_risk=payload.allow_high_risk,
     )
     is_error = "error" in result
@@ -218,6 +219,7 @@ async def mcp_json_rpc(
             tool_name=tool_name,
             tool_input=arguments,
             db=db,
+            context=user.to_context(source="mcp_rpc"),
             allow_high_risk=allow_high_risk,
         )
         is_error = "error" in result
