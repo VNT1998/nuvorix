@@ -16,6 +16,12 @@
 
 ---
 
+## 🏛️ Core Architecture Principle
+
+> **Nuvorix separates probabilistic AI components from deterministic platform controls. Embeddings, LLMs, and agents handle probabilistic workloads, while authorization, tenancy, release gates, state transitions, and irreversible platform actions are enforced by deterministic services.**
+
+---
+
 ## 🌟 Executive Summary
 
 AI/ML and GenAI teams repeatedly reinvent infrastructure for experiment tracking, RAG pipelines, agent runtimes, release gates, Blue/Green rollouts, telemetry, secrets, and cost monitoring.
@@ -29,17 +35,17 @@ Develop / Train (Scikit-Learn / MLflow)
      ↓
 Register Artifacts / Prompts / Datasets
      ↓
-Automated Evaluation Suite (Faithfulness, Latency, Accuracy, Cost)
+Automated Evaluation Suite (Recall@3, MRR@3, Tool Accuracy, p95 Latency)
      ↓
 Apply Release Policy Gate (ALLOW / BLOCK)
      ↓
-Deploy to Kubernetes (Dev / Staging / Production / Blue-Green)
+Deploy & Shift Traffic (Dev / Staging / Production / Blue-Green)
      ↓
 Observe (OpenTelemetry Traces, Prometheus Metrics, FinOps Cost)
      ↓
-Detect Regressions & Incidents (AI Root Cause Analysis)
+Detect Regressions & Incidents (Active Deployment Correlation)
      ↓
-One-Click Remediate or Instant Rollback
+One-Click Remediate or Safe Automated Rollback
 ```
 
 ---
@@ -59,49 +65,49 @@ Multi-project boundaries organizing ML models, RAG subsystems, and LangGraph age
 ---
 
 ### 3. Agent Runtime Studio & MCP Tools
-Interactive LangGraph execution runner with step-by-step trace inspection (`Planner` → `Tool Call` → `Observation` → `Final Response`) and Model Context Protocol (MCP) tool permission enforcement.
+Interactive LangGraph execution runner with step-by-step trace inspection (`Planner` → `Tool Call` → `Observation` → `Final Response`), ExecutionContext authorization, and Model Context Protocol (MCP) tool security.
 ![Agent Runtime Studio](docs/screenshots/03_agent_studio.png)
 
 ---
 
 ### 4. Automated Evaluation & Release Policy Gates
-Deterministic release gates evaluating candidate versions against policy thresholds (`min_faithfulness`, `min_answer_correctness`, `max_latency`, `max_cost`). Prevents degraded versions from reaching staging or production.
+Deterministic release gates evaluating candidate versions against empirical policy thresholds (`Recall@3`, `MRR@3`, tool selection accuracy, p95 latency distribution, cost). Prevents degraded versions from reaching staging or production.
 ![Evaluation Gates](docs/screenshots/04_evaluation_gates.png)
 
 ---
 
-### 5. Blue/Green Deployments & Instant Rollback
-Zero-downtime Blue/Green traffic allocation (0% → 100%) across `dev`, `staging`, and `production` environments with one-click automated rollback.
+### 5. Deployment State Machine & Rollback
+Deterministic deployment lifecycle enforcing legal state transitions (`candidate`, `active`, `retired`, `rolled_back`, `circuit_open`), `Idempotency-Key` deduplication, and safe automated rollback.
 ![Deployments and Rollback](docs/screenshots/05_deployments_rollout.png)
 
 ---
 
 ### 6. ML Platform Training Lifecycle
-Real Scikit-learn training pipeline calculating RMSE, MAE, R², and duration metrics, persisting joblib artifacts, and managing model promotion.
+Real Scikit-learn training pipeline calculating RMSE, MAE, R², and duration metrics, persisting joblib artifacts, and managing MLflow model registry promotion.
 ![ML Platform Studio](docs/screenshots/06_ml_studio.png)
 
 ---
 
 ### 7. RAG Knowledge Hub & Semantic Vector Retrieval
-Ingest engineering specifications, compute normalized dense vector embeddings, chunk passages, and perform vector similarity queries with source attribution.
+Ingest engineering specifications, compute normalized dense vector embeddings (FastEmbed BAAI/bge-small-en-v1.5), chunk passages, and perform vector similarity queries with PostgreSQL pgvector or cosine similarity fallback.
 ![RAG Knowledge Hub](docs/screenshots/07_rag_knowledge.png)
 
 ---
 
 ### 8. LLM Gateway & FinOps Usage Metering
-Provider-agnostic routing (`Local`, `OpenAI`, `Anthropic`, `Gemini`), token accounting, request latency measurement, and granular cost breakdown.
+Provider-agnostic routing (`Local`, `OpenAI`, `Anthropic`, `Gemini`), token accounting, request latency measurement, and granular FinOps cost estimation based on model pricing tiers.
 ![LLM Gateway & FinOps](docs/screenshots/08_llm_gateway.png)
 
 ---
 
-### 9. Incident Detection & AI Root Cause Analysis (RCA)
-Detects telemetry anomalies, correlates signals with rollout events, formulates root cause hypotheses with confidence scores, and enables one-click automated rollback.
+### 9. Incident Remediation & Rollback Correlation
+Correlates operational incidents with active workload deployments, verifies deployment ownership and active state before remediation, and triggers safe automated rollback.
 ![Incident Detection & RCA](docs/screenshots/09_incidents_rca.png)
 
 ---
 
-### 10. Security & Immutable Audit Trail
-Tamper-evident audit logging for all platform actions, release promotions, rollbacks, and role-based access control (RBAC) decisions.
+### 10. Security, Multi-Tenancy & Audit Logging
+Multi-tenant isolation across organizations, database-backed API keys (`nvx_*`) with constant-time verification, RBAC permissions and token scopes, and complete audit logging with request correlation (`X-Request-ID`).
 ![Security and Audit Trail](docs/screenshots/10_audit_trail.png)
 
 ---
@@ -221,21 +227,48 @@ if eval_res["decision"] == "ALLOW":
 
 ---
 
+## ⚖️ Local Development vs. Production Capabilities
+
+| Capability | Local Development | Production | Status |
+|---|---|---|---|
+| **Application Database** | SQLite (`aiosqlite`) | PostgreSQL 16 | Verified Local (SQLite) / Production-Ready (Postgres) |
+| **Vector Database** | Cosine similarity fallback | PostgreSQL `pgvector` (`<=>` distance) | Verified Real |
+| **MLflow Tracking** | Local file / SQLite (`mlflow.db`) | Remote MLflow tracking server + object store | Verified Local (Local) / Artifact Only (Remote) |
+| **Queue Durability** | In-process asynchronous execution | Redis-backed durable queue (**not yet implemented**) | In-Process (Current) / Not Implemented (Redis queue) |
+| **Artifact Storage** | `LocalFileSystemStorage` (`~/.nuvorix/artifacts`) | `S3CompatibleStorage` (S3 / R2 / MinIO) | Verified Local (Local) / Artifact Only (S3) |
+| **Authentication** | `AUTH_MODE=development` (headers permitted) | `AUTH_MODE=production` (Signed tokens / DB API keys) | Production-Ready |
+| **Telemetry & Traces** | In-memory ring buffer (`/telemetry/traces`) | OTLP HTTP collector exporter | Verified Real |
+| **Traffic Shifting** | Logical database state & traffic percentage | Kubernetes Service / Ingress / ArgoCD | Verified Real (Logical) / Artifact Only (K8s) |
+
+---
+
 ## 🧪 Testing & Code Quality
 
-Nuvorix features an automated test suite verifying database operations, real MLflow model training and model registry version promotion, dense vector embeddings with ONNX-runtime fastembed, pgvector queries, real LangGraph agent state machine loops, OpenTelemetry distributed tracing spans, standard MCP protocol endpoints, empirical release policy evaluation gates, Blue/Green deployments, incident rollbacks, token-based authentication, RBAC permission enforcement, and cross-tenant isolation.
+Nuvorix features a comprehensive test suite across 9 dedicated test modules verifying:
+- Database-backed API keys (`nvx_*`), constant-time verification, revocation, and RBAC token scopes
+- Tool authorization, ExecutionContext passing, and multi-tenant isolation
+- PostgreSQL pgvector and SQLite cosine similarity and distance alignment
+- Empirical evaluation metrics (`Recall@3`, `MRR@3`, tool selection router accuracy, p95 latency distributions)
+- Deployment state machine transitions, `Idempotency-Key` deduplication, and safe incident rollbacks
+- OpenTelemetry span correlation and W3C trace context propagation
+- Real LangGraph agent loops and Model Context Protocol (MCP) tool execution
+- Real MLflow run tracking and model registry promotion
 
 See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) for the verified capability matrix.
 
 ```bash
-# Run full pytest test suite (21 passed)
+# Run full pytest test suite (38 passed across 9 test suites)
 uv run pytest
 
 # Run Ruff linter & type checks
 uv run ruff check apps packages
 
 # Verify TypeScript & Vite production build
-cd apps/web && npm run build
+cd apps/web && npm run build && cd ../..
+
+# Verify Terraform configuration
+terraform fmt -check -recursive infra/terraform
+terraform -chdir=infra/terraform/environments/dev validate
 ```
 
 ---

@@ -1,40 +1,76 @@
 # Nuvorix — Implementation & Verification Status
 
-Last updated: Fully verified against `Nuvorix_Revised_Correction_and_Build_Plan.md`
+Last updated: Fully verified against `Nuvorix_AntiGravity_Detailed_Fix_Spec.md`
+
+## Architecture Statement
+
+> **Nuvorix separates probabilistic AI components from deterministic platform controls. Embeddings, LLMs, and agents handle probabilistic workloads, while authorization, tenancy, release gates, state transitions, and irreversible platform actions are enforced by deterministic services.**
+
+---
 
 ## Capability Status Matrix
 
+Each capability in Nuvorix is classified into one of six standardized lifecycle statuses:
+- **Verified Real**: Fully executed, exercised, and validated with real backend code and passing automated tests.
+- **Verified Local**: Real local implementation running in-process or on local storage without remote network dependency.
+- **Production-Ready**: Hardened for multi-tenant production execution with external configuration and zero dev bypasses.
+- **Artifact Only**: Infrastructure manifest, configuration, or abstraction exists in repository, but live cluster runtime is not active in dev.
+- **Experimental**: Functional prototype or early interface requiring additional hardening before production deployment.
+- **Simulated**: Deterministic synthetic generation used for local mocking or unit benchmarking.
+
 | Capability | Current State | Verification / Evidence | Status |
 |---|---|---|:---:|
-| **Control Plane API** | FastAPI + Async SQLAlchemy 2.0 + Pydantic v2 | 21 passing pytest tests in `apps/api/tests` | ✅ Verified Real |
-| **MLflow Experiment Tracking** | Real `mlflow` runs, metrics, parameters, model logging | Runs logged in `sqlite:///mlflow.db` | ✅ Verified Real |
-| **MLflow Model Registry** | Official MLflow registry entities & stages integration | `create_registered_model`, `create_model_version`, tags/aliases | ✅ Verified Real |
-| **LangGraph StateGraph Engine** | Real `langgraph.graph.StateGraph` state machine | Nodes and conditional edges functional with tool execution | ✅ Verified Real |
-| **RAG Embeddings** | Real dense embedding model (`fastembed` BAAI/bge-small-en-v1.5) | 384-dimensional dense vectors generated via ONNX Runtime | ✅ Verified Real |
-| **Vector Database** | Native PostgreSQL `pgvector` index + cosine similarity fallback | Native `Vector(384)` column on `KnowledgeChunk` | ✅ Verified Real |
-| **Evaluation Engine** | Empirical benchmark suite execution & threshold policies | Scikit-learn test splits + RAG benchmark suite (no string heuristics) | ✅ Verified Real |
-| **LLM Gateway** | Real provider client abstraction (`OpenAICompatibleProvider`, `LocalDeterministicProvider`) | HTTP calls to OpenAI/vLLM/Ollama + local fallback with token accounting | ✅ Verified Real |
-| **MCP Interface** | Model Context Protocol JSON-RPC 2.0 & REST endpoints | `initialize`, `notifications/initialized`, `tools/list`, `tools/call`, `ping` | ✅ Verified Real |
-| **Auth & RBAC** | Production token verification + development mode headers | Signed HMAC-SHA256 tokens, 401 on unauthenticated in prod, 403 on missing perms | ✅ Verified Real |
-| **Tenant Isolation** | Strict organization boundary enforcement | Query filtering across projects, workloads, deployments, models, audits | ✅ Verified Real |
-| **OpenTelemetry SDK** | In-memory ring buffer exporter + spans | In-process trace inspection via `/telemetry/traces` | ✅ Verified Real |
-| **Terraform IaC** | Modules in `infra/terraform/` | Passed `terraform validate` and `terraform fmt` | ✅ Verified Real |
-| **Helm Chart** | Chart in `infra/helm/nuvorix/` | Standard Helm v2/v3 chart structure with templates | 🟡 Artifact Ready |
-| **Kubernetes / Kind** | Multi-service manifest in `infra/kind/nuvorix-all.yaml` | Postgres (pgvector), API, Console, ConfigMap manifests | 🟡 Artifact Ready |
-| **CI/CD Workflows** | GitHub Actions `.github/workflows/ci.yml` | Strict `uv sync --frozen` and `npm ci` without fallback shortcuts | ✅ Verified Real |
-| **Frontend Web Console** | React 19 + TypeScript + Vite + Tailwind CSS | Passed `tsc -b && vite build` in 1.4s | ✅ Verified Real |
+| **Control Plane API** | FastAPI + Async SQLAlchemy 2.0 + Pydantic v2 | 38 passing pytest tests across 9 test suites | Verified Real |
+| **Authentication & RBAC** | Production token verification + DB API keys (`nvx_*`) + dev headers | Strict 401 unauthenticated in prod, constant-time hash check, RBAC permissions & scopes | Production-Ready |
+| **Tool Authorization & Tenant Isolation** | ExecutionContext + caller validation + high-risk confirmation | Multi-tenant filtering across tools, knowledge search, workloads, and audit trails | Verified Real |
+| **MLflow Experiment Tracking** | Real `mlflow` runs, metrics, parameters, model artifact logging | Local runs logged in `sqlite:///mlflow.db` | Verified Local |
+| **MLflow Model Registry** | Official MLflow registry entities & stages integration | `create_registered_model`, `create_model_version`, tags/aliases | Verified Local |
+| **LangGraph Agent State Machine** | Real `langgraph.graph.StateGraph` state machine | Nodes and conditional edges functional with tool execution | Verified Real |
+| **RAG Embeddings** | Real dense embedding model (`fastembed` BAAI/bge-small-en-v1.5) | 384-dimensional dense vectors generated via ONNX Runtime | Verified Real |
+| **Vector Retrieval & Ranking** | Native PostgreSQL `pgvector` index + mathematically aligned cosine similarity fallback | Normalized cosine similarity in $[0, 1]$, distance $= 1 - \text{sim}$, `min_score` filtering | Verified Real |
+| **Evaluation Engine** | Empirical benchmark suite execution & threshold policies | Real `Recall@3`, `MRR@3`, tool selection accuracy, and p95 latency distribution (no string heuristics) | Verified Real |
+| **LLM Gateway** | Real provider client abstraction (`OpenAICompatibleProvider`, `LocalDeterministicProvider`) | HTTP calls to OpenAI/vLLM/Ollama + local fallback with token accounting | Verified Real |
+| **MCP Standard Protocol** | Model Context Protocol JSON-RPC 2.0 & REST endpoints | `initialize`, `notifications/initialized`, `tools/list`, `tools/call`, `ping` | Verified Real |
+| **Deployment State Machine** | Centralized legal transitions (`candidate`, `active`, `retired`, `rolled_back`, etc.) | State machine validation + `Idempotency-Key` deduplication on deployment mutations | Verified Real |
+| **Incident Remediation Safety** | Linked deployment state verification, tenant checks, and rollback | Incident links deployment ID, verifies active state, records before/after audit state | Verified Real |
+| **Storage Abstraction** | Pluggable `StorageBackend` (`LocalFileSystemStorage`, `S3CompatibleStorage`) | Local file storage with non-blocking threads + S3-compatible backend | Verified Local |
+| **OpenTelemetry Telemetry** | In-memory ring buffer exporter + optional OTLP HTTP collector export | Trace inspection via `/telemetry/traces` + `X-Request-ID` correlation middleware | Verified Real |
+| **Terraform IaC** | Modules in `infra/terraform/` | Passed `terraform validate` and `terraform fmt` | Artifact Only |
+| **Helm Chart** | Chart in `infra/helm/nuvorix/` (externalized secrets, dev/prod values) | Standard Helm v3 chart with `.Values.secrets.existingSecret` | Artifact Only |
+| **Kubernetes / Kind** | Multi-service manifest in `infra/kind/nuvorix-all.yaml` | Postgres (pgvector), API, Console, ConfigMap manifests | Artifact Only |
+| **CI/CD Workflows** | GitHub Actions `.github/workflows/ci.yml` | Strict `uv sync`, `npm ci`, Ruff, Pytest, Terraform fmt/validate, Helm lint | Verified Real |
+| **Frontend Web Console** | React 19 + TypeScript + Vite + Tailwind CSS | Passed `tsc -b && vite build` in 1.36s | Verified Real |
 
-## Truthful Disclosure & Architectural Reality
+---
 
-1. **Embeddings & Vector Search**:
-   - Embeddings are generated using the local ONNX-runtime model `BAAI/bge-small-en-v1.5` producing 384-dimensional dense vectors without requiring external API keys.
-   - Database entities store vectors in a native `Vector(384)` column with pgvector operator `<=>` queries when running on PostgreSQL, and cosine similarity calculation when running on SQLite.
-2. **Quality Gate Evaluations**:
-   - Version evaluations are strictly metric-based. Substring matching on version names (e.g., searching for "bad" or "fail") has been completely eliminated.
-   - Decisions (`ALLOW` vs `BLOCK`) are driven by whether empirical measurements satisfy the `ReleasePolicy` thresholds.
-3. **Authentication Modes**:
-   - `AUTH_MODE=production`: Rejects unauthenticated requests with `401 Unauthorized`. Requires valid HMAC-SHA256 Bearer tokens or `X-API-Key`.
-   - `AUTH_MODE=development`: Permits developer headers (`X-User-Role`, `X-Org-Id`) for frictionless local testing and prototyping.
-   - Mutating routes enforce role-based access control with `403 Forbidden` for unauthorized roles.
-4. **LLM Gateway**:
-   - Supports both remote OpenAI-compatible providers (vLLM, Ollama, OpenAI) via asynchronous HTTP client requests and local deterministic fallback with accurate token accounting and latency metrics.
+## Local Development vs. Production Capabilities
+
+| Capability | Local Development | Production | Status |
+|---|---|---|---|
+| **Application Database** | SQLite (aiosqlite) | PostgreSQL 16 | Verified Local (SQLite) / Production-Ready (Postgres) |
+| **Vector Database** | SQLite fallback with numpy cosine similarity | Native PostgreSQL `pgvector` (`<=>` cosine distance) | Verified Real |
+| **MLflow Tracking** | Local file / SQLite (`mlflow.db`) | Dedicated MLflow tracking server + Postgres + S3 | Verified Local (local) / Artifact Only (remote) |
+| **Queue Durability** | In-process asynchronous execution | Redis-backed durable queue (**not yet implemented**) | Experimental (in-process) / Not Implemented (Redis queue) |
+| **Artifact Storage** | `LocalFileSystemStorage` (`~/.nuvorix/artifacts`) | `S3CompatibleStorage` (AWS S3 / Cloudflare R2 / MinIO) | Verified Local (Local) / Artifact Only (S3) |
+| **Authentication** | `AUTH_MODE=development` (developer headers permitted) | `AUTH_MODE=production` (Signed tokens or DB API keys required) | Production-Ready |
+| **OpenTelemetry Export** | In-memory ring buffer (`/telemetry/traces`) | OTLP HTTP collector exporter (`OTEL_EXPORTER_OTLP_ENDPOINT`) | Verified Real |
+| **Traffic Shifting** | Logical database state and traffic percentage allocation | Kubernetes service / ingress / ArgoCD Rollouts | Verified Real (Logical) / Artifact Only (K8s) |
+| **Secrets Management** | Local `.env` / default development secrets | Kubernetes Secrets / External Secrets Operator | Production-Ready |
+
+---
+
+## Truthful Disclosure & Technical Invariants
+
+1. **AI vs Platform Boundary**:
+   - Probabilistic components (LLMs, FastEmbed embeddings, LangGraph agents) propose insights, retrieve information, and suggest operations.
+   - Deterministic platform components enforce tenant isolation, RBAC scopes, quality release gates, state machines, and rollback actions.
+2. **Evaluation Truthfulness**:
+   - No synthetic or hardcoded metrics claiming to be measured. RAG retrieval evaluations report actual `Recall@3` and `MRR@3`. Agent evaluations report true tool selection router accuracy. Latency metrics measure empirical p95 distributions over repeated iterations.
+   - Missing candidate artifacts immediately trigger a truthful `decision: BLOCK` with `reason: candidate_artifact_unavailable`.
+3. **Authentication & Authorization**:
+   - Database-backed API keys (`nvx_{prefix}_{secret}`) use constant-time SHA-256 validation.
+   - Scoped tokens compute the intersection `role_permissions ∩ scopes`, strictly constraining callers. Unscoped tokens retain full role permissions.
+   - In `AUTH_MODE=production`, unauthenticated calls and developer headers are strictly rejected with `401 Unauthorized`.
+4. **Queue & Traffic Reality**:
+   - Queue durability is currently **not yet implemented**; background jobs execute asynchronously in-process.
+   - Kubernetes traffic routing is logical within the application database; live cluster ArgoCD traffic controllers are provided as deployable infrastructure artifacts.
