@@ -1,9 +1,8 @@
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.app.core.security import UserSession, get_current_user
+from apps.api.app.core.security import UserSession, require_permission
 from apps.api.app.db.session import get_db
 from apps.api.app.models.entities import AuditEvent, Project
 from apps.api.app.schemas.domain import ProjectCreate, ProjectResponse
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/projects", tags=["Projects"])
 async def create_project(
     payload: ProjectCreate,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("projects:create")),
 ):
     project = Project(
         organization_id=user.organization_id,
@@ -42,7 +41,7 @@ async def create_project(
 @router.get("", response_model=list[ProjectResponse])
 async def list_projects(
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("projects:read")),
 ):
     res = await db.execute(
         select(Project).where(Project.organization_id == user.organization_id).order_by(Project.created_at.desc())
@@ -54,9 +53,14 @@ async def list_projects(
 async def get_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("projects:read")),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
+    res = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.organization_id == user.organization_id,
+        )
+    )
     project = res.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -67,9 +71,14 @@ async def get_project(
 async def delete_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("projects:delete")),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
+    res = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.organization_id == user.organization_id,
+        )
+    )
     project = res.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")

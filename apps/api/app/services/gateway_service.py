@@ -1,11 +1,17 @@
+import logging
+import os
 import time
+from abc import ABC, abstractmethod
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.core.telemetry import record_llm_usage
 from apps.api.app.models.entities import LLMUsageLog
+
+logger = logging.getLogger(__name__)
 
 PRICING_TABLE = {
     "local": {"input_per_1k": 0.0001, "output_per_1k": 0.0002},
@@ -15,7 +21,100 @@ PRICING_TABLE = {
 }
 
 
+class BaseLLMProvider(ABC):
+    @abstractmethod
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> tuple[str, int, int]:
+        """Returns tuple of (completion_text, input_tokens, output_tokens)."""
+
+
+class OpenAICompatibleProvider(BaseLLMProvider):
+    """Real HTTP client supporting any OpenAI-compatible API (OpenAI, Groq, Ollama, vLLM)."""
+
+    def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout_sec: float = 8.0):
+        self.base_url = (
+            base_url
+            or os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("LOCAL_LLM_URL")
+            or "https://api.openai.com/v1"
+        )
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        self.timeout = timeout_sec
+
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> tuple[str, int, int]:
+        if not self.api_key and "localhost" not in self.base_url and "127.0.0.1" not in self.base_url:
+            raise ValueError("No API key configured for remote provider.")
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(f"{self.base_url.rstrip('/')}/chat/completions", headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            choice = data["choices"][0]
+            text = choice.get("message", {}).get("content", "")
+            usage = data.get("usage", {})
+            in_tok = usage.get("prompt_tokens", max(len(prompt) // 4, 1))
+            out_tok = usage.get("completion_tokens", max(len(text) // 4, 1))
+            return text, in_tok, out_tok
+
+
+class LocalDeterministicProvider(BaseLLMProvider):
+    """Local deterministic provider for offline operations and testing."""
+
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> tuple[str, int, int]:
+        input_tokens = max(len(prompt.split()) * 2, 1)
+
+        # Generate contextual response based on prompt intent
+        p_lower = prompt.lower()
+        if "architecture" in p_lower or "invariant" in p_lower:
+            text = (
+                "Nuvorix Architecture Invariants:\n"
+                "1. All workloads require quality gate validation (ALLOW/BLOCK) prior to promotion.\n"
+                "2. Distributed traces are captured across all control plane operations.\n"
+                "3. Invariant breaches immediately trigger automated rollback to the last verified active deployment."
+            )
+        elif "deploy" in p_lower or "rollback" in p_lower:
+            text = "Deployment status check complete: Rollout verification passed. Safe to proceed with progression."
+        elif "diagnostic" in p_lower or "health" in p_lower:
+            text = "Diagnostics evaluated: Core database pools, vector indices, and message buffers are healthy."
+        else:
+            text = f"Nuvorix Gateway [{model}]: Processed request successfully under verified platform SLOs."
+
+        output_tokens = max(len(text.split()) * 2, 1)
+        return text, input_tokens, output_tokens
+
+
 class LLMGatewayService:
+    _remote_provider: BaseLLMProvider = OpenAICompatibleProvider()
+    _local_provider: BaseLLMProvider = LocalDeterministicProvider()
+
     @classmethod
     async def chat_completion(
         cls,
@@ -28,21 +127,40 @@ class LLMGatewayService:
         temperature: float = 0.7,
     ) -> dict[str, Any]:
         start_time = time.time()
-        
-        # Approximate token count (1 token ≈ 4 chars)
-        input_tokens = max(len(prompt) // 4, 1)
-
-        # Simulate provider inference with fallback logic
         rates = PRICING_TABLE.get(provider, PRICING_TABLE["local"])
-        response_text = (
-            f"[Gateway Routed: {provider}/{model}]\n"
-            f"Processed request for workload: '{workload_id}'.\n"
-            f"Input query prompt received: '{prompt}'.\n"
-            f"System latency and quality gates verified within SLA."
-        )
-        output_tokens = max(len(response_text) // 4, 1)
+        status = "success"
 
-        latency_ms = round((time.time() - start_time + 0.085) * 1000, 2)
+        # Route through provider abstraction with fallback
+        response_text = ""
+        input_tokens = 0
+        output_tokens = 0
+
+        if provider in ["openai", "anthropic", "gemini"]:
+            try:
+                response_text, input_tokens, output_tokens = await cls._remote_provider.generate(
+                    model=model,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            except Exception as e:
+                logger.warning("Remote provider '%s' failed or unconfigured (%s). Falling back to local provider.", provider, e)
+                status = "fallback"
+                response_text, input_tokens, output_tokens = await cls._local_provider.generate(
+                    model=f"local-{model}",
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+        else:
+            response_text, input_tokens, output_tokens = await cls._local_provider.generate(
+                model=model,
+                prompt=prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+        latency_ms = round((time.time() - start_time) * 1000, 2)
         cost = (
             (input_tokens / 1000.0) * rates["input_per_1k"]
             + (output_tokens / 1000.0) * rates["output_per_1k"]
@@ -59,7 +177,7 @@ class LLMGatewayService:
             output_tokens=output_tokens,
             latency_ms=latency_ms,
             estimated_cost=round(cost, 6),
-            status="success",
+            status=status,
         )
         db.add(log_entry)
 
@@ -67,7 +185,7 @@ class LLMGatewayService:
         record_llm_usage(
             provider=provider,
             model=model,
-            status="success",
+            status=status,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_sec=latency_ms / 1000.0,
@@ -86,8 +204,9 @@ class LLMGatewayService:
             "output_tokens": output_tokens,
             "latency_ms": latency_ms,
             "estimated_cost": round(cost, 6),
-            "status": "success",
+            "status": status,
         }
+
 
     @classmethod
     async def get_cost_summary(cls, db: AsyncSession, workload_id: str | None = None) -> dict[str, Any]:

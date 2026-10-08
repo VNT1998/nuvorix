@@ -3,16 +3,16 @@ terraform {
   required_providers {
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = ">= 2.23.0"
+      version = "~> 2.31.0"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = ">= 2.11.0"
+      version = "~> 2.14.0"
     }
   }
 }
 
-resource "kubernetes_namespace" "nuvorix" {
+resource "kubernetes_namespace_v1" "nuvorix" {
   metadata {
     name = var.namespace
     labels = {
@@ -28,7 +28,7 @@ resource "helm_release" "nuvorix" {
   repository = var.helm_chart_repository
   chart      = var.helm_chart_name
   version    = var.helm_chart_version
-  namespace  = kubernetes_namespace.nuvorix.metadata[0].name
+  namespace  = kubernetes_namespace_v1.nuvorix.metadata[0].name
 
   set {
     name  = "global.environment"

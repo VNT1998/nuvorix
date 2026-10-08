@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.app.core.security import UserSession, get_current_user
+from apps.api.app.core.security import UserSession, require_permission
 from apps.api.app.db.session import get_db
+from apps.api.app.models.entities import Project
 from apps.api.app.schemas.domain import IncidentResponse, RemediateIncidentRequest
 from apps.api.app.services.incident_service import IncidentRCAService
 
@@ -13,8 +15,14 @@ router = APIRouter(tags=["Incidents & Root Cause Analysis"])
 async def list_project_incidents(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("projects:read")),
 ):
+    res_p = await db.execute(
+        select(Project).where(Project.id == project_id, Project.organization_id == user.organization_id)
+    )
+    if not res_p.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
     incidents = await IncidentRCAService.get_all_incidents(db=db, project_id=project_id)
     return [
         IncidentResponse(
@@ -37,9 +45,9 @@ async def list_project_incidents(
 @router.get("/incidents", response_model=list[IncidentResponse])
 async def list_all_incidents(
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("projects:read")),
 ):
-    incidents = await IncidentRCAService.get_all_incidents(db=db)
+    incidents = await IncidentRCAService.get_all_incidents(db=db, org_id=user.organization_id)
     return [
         IncidentResponse(
             id=i.id,
@@ -63,7 +71,7 @@ async def remediate_incident(
     incident_id: str,
     payload: RemediateIncidentRequest,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("incidents:remediate")),
 ):
     try:
         res = await IncidentRCAService.remediate_incident(
@@ -71,6 +79,7 @@ async def remediate_incident(
             incident_id=incident_id,
             action=payload.action,
             user_id=user.user_id,
+            org_id=user.organization_id,
         )
         return res
     except ValueError as e:

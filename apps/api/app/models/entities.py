@@ -1,6 +1,7 @@
 import datetime
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -207,7 +208,7 @@ class KnowledgeBase(Base):
     project_id: Mapped[str] = mapped_column(String(64), ForeignKey("projects.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
-    embedding_model: Mapped[str] = mapped_column(String(128), default="text-embedding-3-small")
+    embedding_model: Mapped[str] = mapped_column(String(128), default="BAAI/bge-small-en-v1.5")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     project: Mapped["Project"] = relationship(back_populates="knowledge_bases")
@@ -238,6 +239,7 @@ class KnowledgeChunk(Base):
     knowledge_base_id: Mapped[str] = mapped_column(String(64), ForeignKey("knowledge_bases.id"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)  # native pgvector column
     embedding_json: Mapped[list] = mapped_column(JSON, default=list)  # normalized vector coordinates
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

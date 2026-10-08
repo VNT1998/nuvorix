@@ -223,10 +223,12 @@ if eval_res["decision"] == "ALLOW":
 
 ## 🧪 Testing & Code Quality
 
-Nuvorix has an automated test suite verifying database operations, real MLflow model training and run registration, RAG vector retrieval, real LangGraph agent state machine loops, OpenTelemetry distributed tracing spans, standard MCP protocol endpoints, release policy evaluation gates, Blue/Green deployments, and incident rollbacks.
+Nuvorix features an automated test suite verifying database operations, real MLflow model training and model registry version promotion, dense vector embeddings with ONNX-runtime fastembed, pgvector queries, real LangGraph agent state machine loops, OpenTelemetry distributed tracing spans, standard MCP protocol endpoints, empirical release policy evaluation gates, Blue/Green deployments, incident rollbacks, token-based authentication, RBAC permission enforcement, and cross-tenant isolation.
+
+See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) for the verified capability matrix.
 
 ```bash
-# Run full pytest test suite (15 passed)
+# Run full pytest test suite (21 passed)
 uv run pytest
 
 # Run Ruff linter & type checks

@@ -3,12 +3,12 @@ terraform {
   required_providers {
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = ">= 2.23.0"
+      version = "~> 2.31.0"
     }
   }
 }
 
-resource "kubernetes_persistent_volume_claim" "artifact_storage" {
+resource "kubernetes_persistent_volume_claim_v1" "artifact_storage" {
   metadata {
     name      = "${var.prefix}-artifact-store"
     namespace = var.namespace

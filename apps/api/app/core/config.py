@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     MLFLOW_TRACKING_URI: str = "sqlite:///mlflow.db"
     
     # Security & RBAC
-    AUTH_ENABLED: bool = False
+    AUTH_MODE: str = "development"  # "development" (allows dev headers) or "production" (enforces token validation)
+    AUTH_ENABLED: bool = True
     DEFAULT_ORG_ID: str = "org-demo-nuvorix"
     DEFAULT_USER_ID: str = "usr-demo-admin"
     DEFAULT_USER_ROLE: str = "admin"

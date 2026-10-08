@@ -1,15 +1,26 @@
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.app.core.security import UserSession, get_current_user
+from apps.api.app.core.security import UserSession, require_permission
 from apps.api.app.db.session import get_db
-from apps.api.app.models.entities import Deployment
+from apps.api.app.models.entities import Deployment, Project, Workload
 from apps.api.app.schemas.domain import DeploymentCreate, DeploymentResponse, RollbackResponse
 from apps.api.app.services.deploy_service import DeploymentPlatformService
 
 router = APIRouter(tags=["Deployments & Rollback"])
+
+
+async def _verify_workload_org(db: AsyncSession, workload_id: str, org_id: str) -> Workload:
+    res = await db.execute(
+        select(Workload)
+        .join(Project, Workload.project_id == Project.id)
+        .where(Workload.id == workload_id, Project.organization_id == org_id)
+    )
+    workload = res.scalar_one_or_none()
+    if not workload:
+        raise HTTPException(status_code=404, detail="Workload not found")
+    return workload
 
 
 @router.post("/workloads/{workload_id}/deployments", response_model=DeploymentResponse, status_code=status.HTTP_201_CREATED)
@@ -17,8 +28,9 @@ async def create_deployment(
     workload_id: str,
     payload: DeploymentCreate,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("deployments:create")),
 ):
+    await _verify_workload_org(db, workload_id, user.organization_id)
     try:
         dep = await DeploymentPlatformService.create_deployment(
             db=db,
@@ -37,8 +49,9 @@ async def create_deployment(
 async def list_workload_deployments(
     workload_id: str,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("workloads:read")),
 ):
+    await _verify_workload_org(db, workload_id, user.organization_id)
     res = await db.execute(
         select(Deployment).where(Deployment.workload_id == workload_id).order_by(Deployment.created_at.desc())
     )
@@ -48,9 +61,15 @@ async def list_workload_deployments(
 @router.get("/deployments", response_model=list[DeploymentResponse])
 async def list_all_deployments(
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("workloads:read")),
 ):
-    res = await db.execute(select(Deployment).order_by(Deployment.created_at.desc()))
+    res = await db.execute(
+        select(Deployment)
+        .join(Workload, Deployment.workload_id == Workload.id)
+        .join(Project, Workload.project_id == Project.id)
+        .where(Project.organization_id == user.organization_id)
+        .order_by(Deployment.created_at.desc())
+    )
     return list(res.scalars().all())
 
 
@@ -58,8 +77,17 @@ async def list_all_deployments(
 async def rollback_deployment(
     deployment_id: str,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("deployments:rollback")),
 ):
+    res_dep = await db.execute(
+        select(Deployment)
+        .join(Workload, Deployment.workload_id == Workload.id)
+        .join(Project, Workload.project_id == Project.id)
+        .where(Deployment.id == deployment_id, Project.organization_id == user.organization_id)
+    )
+    if not res_dep.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
     try:
         res = await DeploymentPlatformService.rollback_deployment(
             db=db,

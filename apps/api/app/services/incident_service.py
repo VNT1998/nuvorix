@@ -5,16 +5,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.app.core.telemetry import INCIDENTS_TOTAL
-from apps.api.app.models.entities import AuditEvent, Deployment, Incident, Workload
+from apps.api.app.models.entities import AuditEvent, Deployment, Incident, Project, Workload
 from apps.api.app.services.deploy_service import DeploymentPlatformService
 
 
 class IncidentRCAService:
     @classmethod
-    async def get_all_incidents(cls, db: AsyncSession, project_id: str | None = None) -> list[Incident]:
+    async def get_all_incidents(
+        cls,
+        db: AsyncSession,
+        project_id: str | None = None,
+        org_id: str | None = None,
+    ) -> list[Incident]:
         query = select(Incident).order_by(Incident.created_at.desc())
         if project_id:
             query = query.where(Incident.project_id == project_id)
+        if org_id:
+            query = query.join(Project, Incident.project_id == Project.id).where(
+                Project.organization_id == org_id
+            )
         res = await db.execute(query)
         return list(res.scalars().all())
 
@@ -53,11 +62,22 @@ class IncidentRCAService:
         incident_id: str,
         action: str = "rollback",
         user_id: str = "usr-demo-admin",
+        org_id: str | None = None,
     ) -> dict[str, Any]:
-        res = await db.execute(select(Incident).where(Incident.id == incident_id))
+        query = select(Incident).where(Incident.id == incident_id)
+        if org_id:
+            query = query.join(Project, Incident.project_id == Project.id).where(
+                Project.organization_id == org_id
+            )
+        res = await db.execute(query)
         incident = res.scalar_one_or_none()
         if not incident:
             raise ValueError(f"Incident with id '{incident_id}' not found.")
+
+        # Find project to get organization_id for audit
+        res_p = await db.execute(select(Project).where(Project.id == incident.project_id))
+        proj = res_p.scalar_one_or_none()
+        audit_org = proj.organization_id if proj else (org_id or "org-demo-nuvorix")
 
         # Find latest active deployment in this project's workloads to trigger rollback
         res_w = await db.execute(select(Workload).where(Workload.project_id == incident.project_id))
@@ -81,7 +101,7 @@ class IncidentRCAService:
         incident.resolved_at = datetime.datetime.now(datetime.UTC)
 
         audit = AuditEvent(
-            organization_id="org-demo-nuvorix",
+            organization_id=audit_org,
             user_id=user_id,
             action="incidents:remediate",
             resource_type="incident",

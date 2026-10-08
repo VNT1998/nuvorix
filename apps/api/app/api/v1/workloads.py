@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.app.core.security import UserSession, get_current_user
+from apps.api.app.core.security import UserSession, require_permission
 from apps.api.app.core.telemetry import ACTIVE_WORKLOADS_GAUGE
 from apps.api.app.db.session import get_db
 from apps.api.app.models.entities import AuditEvent, Project, Workload
@@ -16,9 +16,11 @@ async def create_workload(
     project_id: str,
     payload: WorkloadCreate,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("workloads:create")),
 ):
-    res_p = await db.execute(select(Project).where(Project.id == project_id))
+    res_p = await db.execute(
+        select(Project).where(Project.id == project_id, Project.organization_id == user.organization_id)
+    )
     if not res_p.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -50,8 +52,14 @@ async def create_workload(
 async def list_project_workloads(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("workloads:read")),
 ):
+    res_p = await db.execute(
+        select(Project).where(Project.id == project_id, Project.organization_id == user.organization_id)
+    )
+    if not res_p.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
     res = await db.execute(
         select(Workload).where(Workload.project_id == project_id).order_by(Workload.created_at.desc())
     )
@@ -61,9 +69,14 @@ async def list_project_workloads(
 @router.get("/workloads", response_model=list[WorkloadResponse])
 async def list_all_workloads(
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("workloads:read")),
 ):
-    res = await db.execute(select(Workload).order_by(Workload.created_at.desc()))
+    res = await db.execute(
+        select(Workload)
+        .join(Project, Workload.project_id == Project.id)
+        .where(Project.organization_id == user.organization_id)
+        .order_by(Workload.created_at.desc())
+    )
     return list(res.scalars().all())
 
 
@@ -71,9 +84,13 @@ async def list_all_workloads(
 async def get_workload(
     workload_id: str,
     db: AsyncSession = Depends(get_db),
-    user: UserSession = Depends(get_current_user),
+    user: UserSession = Depends(require_permission("workloads:read")),
 ):
-    res = await db.execute(select(Workload).where(Workload.id == workload_id))
+    res = await db.execute(
+        select(Workload)
+        .join(Project, Workload.project_id == Project.id)
+        .where(Workload.id == workload_id, Project.organization_id == user.organization_id)
+    )
     workload = res.scalar_one_or_none()
     if not workload:
         raise HTTPException(status_code=404, detail="Workload not found")

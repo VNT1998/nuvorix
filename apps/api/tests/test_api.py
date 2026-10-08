@@ -170,7 +170,7 @@ async def test_evaluation_quality_gate_allow_and_block():
         res_ws = await client.get("/api/v1/workloads")
         agent_w = next(w for w in res_ws.json() if w["type"] == "agent")
 
-        # 1. Good candidate -> should ALLOW
+        # 1. Good candidate with standard policy -> should ALLOW
         allow_resp = await client.post(
             f"/api/v1/workloads/{agent_w['id']}/evaluations",
             json={"version": "v1.2.5-stable"},
@@ -179,10 +179,13 @@ async def test_evaluation_quality_gate_allow_and_block():
         assert allow_resp.json()["decision"] == "ALLOW"
         assert allow_resp.json()["passed"] is True
 
-        # 2. Bad candidate -> should BLOCK with reasons
+        # 2. Candidate tested against strict threshold policy -> should BLOCK empirically with reasons
         block_resp = await client.post(
             f"/api/v1/workloads/{agent_w['id']}/evaluations",
-            json={"version": "v1.3.0-bad-canary"},
+            json={
+                "version": "v1.3.0-candidate",
+                "policy": {"max_p95_latency_ms": 0.001, "min_faithfulness": 0.99},
+            },
         )
         assert block_resp.status_code == 200
         b_data = block_resp.json()

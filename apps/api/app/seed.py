@@ -140,7 +140,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
         project_id=project.id,
         name="Nuvorix Architecture & Runbooks",
         description="Comprehensive platform specifications, release policies, SRE runbooks, and API documentation.",
-        embedding_model="text-embedding-3-small",
+        embedding_model="BAAI/bge-small-en-v1.5",
         created_at=now,
     )
     db.add(kb)
@@ -190,8 +190,9 @@ The rollback shifts 100% of traffic back to the previous stable active deploymen
             knowledge_base_id=kb.id,
             chunk_index=c_idx,
             content=text,
+            embedding=emb,
             embedding_json=emb,
-            metadata_json={"doc_id": doc_id, "title": "Documentation"},
+            metadata_json={"doc_id": doc_id, "title": "Documentation", "model": "BAAI/bge-small-en-v1.5"},
             created_at=now,
         )
         db.add(chunk)

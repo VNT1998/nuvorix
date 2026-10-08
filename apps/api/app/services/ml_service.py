@@ -107,7 +107,7 @@ class MLPlatformService:
             "algorithm": "Ridge",
         }
 
-        # 7. Real MLflow Tracking Run
+        # 7. Real MLflow Tracking Run & Model Registry
         experiment_name = f"nuvorix-{workload.name}"
         mlflow.set_experiment(experiment_name)
         mlflow_run_id = None
@@ -126,12 +126,32 @@ class MLPlatformService:
         except Exception as e:
             logger.warning("MLflow run logging fallback: %s", e)
 
+        # 8. Register in MLflow Model Registry
+        mlflow_model_version = None
+        if mlflow_run_id and mlflow_artifact_uri:
+            try:
+                client = mlflow.tracking.MlflowClient()
+                try:
+                    client.create_registered_model(model_name)
+                except Exception as reg_err:
+                    logger.debug("Model %s may already be registered: %s", model_name, reg_err)
+                mv = client.create_model_version(
+                    name=model_name,
+                    source=f"{mlflow_artifact_uri}/model",
+                    run_id=mlflow_run_id,
+                    tags={"version": version_str, "workload_id": workload_id, "stage": "registered"},
+                )
+                mlflow_model_version = mv.version
+            except Exception as e:
+                logger.warning("MLflow Model Registry registration fallback: %s", e)
+
         if mlflow_run_id:
             parameters["mlflow_run_id"] = mlflow_run_id
             parameters["mlflow_experiment"] = experiment_name
             parameters["mlflow_artifact_uri"] = mlflow_artifact_uri
+            parameters["mlflow_model_version"] = mlflow_model_version
 
-        # 8. Create ModelVersion
+        # 9. Create ModelVersion
         version_entity = ModelVersion(
             model_id=model_entity.id,
             version=version_str,
@@ -142,7 +162,7 @@ class MLPlatformService:
         )
         db.add(version_entity)
 
-        # 9. Record Audit
+        # 10. Record Audit
         audit = AuditEvent(
             organization_id="org-demo-nuvorix",
             user_id=user_id,
@@ -164,6 +184,7 @@ class MLPlatformService:
             "artifact_uri": artifact_path,
             "status": version_entity.status,
             "mlflow_run_id": mlflow_run_id,
+            "mlflow_model_version": mlflow_model_version,
         }
 
     @classmethod
@@ -191,15 +212,23 @@ class MLPlatformService:
         if target_env == "production":
             workload.active_version = version_entity.version
 
-        # Tag in MLflow if run_id exists
+        # Update in MLflow Model Registry & runs
         if isinstance(version_entity.parameters_json, dict):
             mlflow_run_id = version_entity.parameters_json.get("mlflow_run_id")
-            if mlflow_run_id:
-                try:
-                    client = mlflow.tracking.MlflowClient()
+            mlflow_mv = version_entity.parameters_json.get("mlflow_model_version")
+            try:
+                client = mlflow.tracking.MlflowClient()
+                if mlflow_run_id:
                     client.set_tag(mlflow_run_id, "nuvorix.stage", target_env)
-                except Exception as e:
-                    logger.warning("MLflow tagging fallback: %s", e)
+                if mlflow_mv:
+                    client.set_model_version_tag(model.name, str(mlflow_mv), "stage", target_env)
+                    if target_env == "production":
+                        client.set_registered_model_alias(model.name, "production", str(mlflow_mv))
+                    elif target_env == "staging":
+                        client.set_registered_model_alias(model.name, "staging", str(mlflow_mv))
+            except Exception as e:
+                logger.warning("MLflow Model Registry transition fallback: %s", e)
+
 
         audit = AuditEvent(
             organization_id="org-demo-nuvorix",
@@ -252,3 +281,26 @@ class MLPlatformService:
         except Exception as e:
             logger.warning("MLflow search runs fallback: %s", e)
             return []
+
+    @classmethod
+    def get_registered_models_from_mlflow(cls) -> list[dict[str, Any]]:
+        cls._init_mlflow()
+        try:
+            client = mlflow.tracking.MlflowClient()
+            reg_models = client.search_registered_models()
+            results = []
+            for m in reg_models:
+                results.append({
+                    "name": m.name,
+                    "versions_count": len(m.latest_versions),
+                    "latest_versions": [
+                        {"version": v.version, "stage": getattr(v, "current_stage", "none"), "run_id": v.run_id}
+                        for v in m.latest_versions
+                    ],
+                    "aliases": dict(m.aliases) if hasattr(m, "aliases") and m.aliases else {},
+                })
+            return results
+        except Exception as e:
+            logger.warning("MLflow search registered models fallback: %s", e)
+            return []
+
