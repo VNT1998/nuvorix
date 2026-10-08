@@ -16,28 +16,56 @@ from apps.api.app.models.entities import (
     KnowledgeBase,
     Model,
     ModelVersion,
+    Project,
     Workload,
 )
 from apps.api.app.schemas.domain import ReleasePolicy
+from apps.api.app.services.agent_service import AgentRuntimeService
 from apps.api.app.services.ml_service import MLPlatformService
 from apps.api.app.services.rag_service import RAGPlatformService
 
-# Standard RAG benchmark evaluation test suite
-RAG_BENCHMARK_SUITE = [
+# Benchmark dataset for RAG retrieval with ground truth expectations
+RAG_BENCHMARK_CASES = [
     {
         "query": "What platform invariants does Nuvorix enforce before deployment?",
+        "expected_answer": "The control plane enforces automated release gates before any workload version can be promoted to staging or production.",
+        "expected_sources": ["doc-arch-spec"],
         "expected_keywords": ["release", "gate", "invariants", "staging", "production"],
-        "min_expected_score": 0.50,
+        "min_expected_score": 0.35,
     },
     {
         "query": "How does the SRE runbook handle incident rollback?",
+        "expected_answer": "The platform operator reviews telemetry and executes an automated rollback shifting 100% of traffic back.",
+        "expected_sources": ["doc-sre-runbook"],
         "expected_keywords": ["rollback", "incident", "traffic", "telemetry"],
-        "min_expected_score": 0.50,
+        "min_expected_score": 0.35,
     },
     {
         "query": "What telemetry and cost metrics are tracked by the control plane?",
+        "expected_answer": "All LLM and tool calls are captured with high-fidelity latency, token usage, and cost attribution.",
+        "expected_sources": ["doc-arch-spec"],
         "expected_keywords": ["latency", "token", "cost", "attribution"],
-        "min_expected_score": 0.40,
+        "min_expected_score": 0.30,
+    },
+]
+
+# Benchmark dataset for tool selection evaluation
+TOOL_BENCHMARK_CASES = [
+    {
+        "prompt": "Search the knowledge base for platform invariants and architecture specifications",
+        "expected_tool": "knowledge_search",
+    },
+    {
+        "prompt": "Check current deployment status and active replicas for this project",
+        "expected_tool": "project_deployment_status",
+    },
+    {
+        "prompt": "Run an empirical health and diagnostic check on the system components",
+        "expected_tool": "diagnostic_check",
+    },
+    {
+        "prompt": "Trigger emergency circuit breaker to isolate degraded traffic",
+        "expected_tool": "emergency_circuit_breaker",
     },
 ]
 
@@ -50,22 +78,30 @@ class EvaluationEngineService:
         workload_id: str,
         version: str,
         policy: ReleasePolicy | None = None,
-        user_id: str = "usr-demo-admin",
+        user_id: str = "dev-demo-user",
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Executes actual candidate workload against a held-out evaluation dataset.
-        Computes genuine empirical metrics and applies deterministic policy gates (ALLOW / BLOCK).
+        Computes genuine empirical metrics (Recall@3, MRR@3, empirical p95 latency, true tool selection accuracy)
+        and applies deterministic policy gates (ALLOW / BLOCK).
         """
-        res_w = await db.execute(select(Workload).where(Workload.id == workload_id))
-        workload = res_w.scalar_one_or_none()
-        if not workload:
+        res_w = await db.execute(
+            select(Workload, Project.organization_id)
+            .join(Project, Workload.project_id == Project.id)
+            .where(Workload.id == workload_id)
+        )
+        row = res_w.first()
+        if not row:
             raise ValueError(f"Workload with id '{workload_id}' not found.")
+        workload, org_id = row
 
         current_policy = policy or ReleasePolicy()
         start_time = datetime.datetime.now(datetime.UTC)
 
         metrics: dict[str, Any] = {}
         reasons: list[str] = []
+        status = "completed"
 
         if workload.type == "ml_model":
             # 1. Fetch registered candidate model version
@@ -81,99 +117,211 @@ class EvaluationEngineService:
                     target_version_entity = v_match
                     break
 
-            # 2. Generate held-out evaluation test split
-            _, _, X_test, y_test = MLPlatformService._generate_synthetic_data(n_samples=500, random_state=100)
-
-            # 3. Load candidate model artifact if available, or train evaluation candidate
-            regressor = None
-            if target_version_entity and os.path.exists(target_version_entity.artifact_uri):
+            # 2. Truthful validation: missing artifact must BLOCK, not silently rebuild
+            if not target_version_entity or not os.path.exists(target_version_entity.artifact_uri):
+                reasons.append(
+                    f"candidate_artifact_unavailable: model version '{version}' artifact not found on disk at "
+                    f"'{target_version_entity.artifact_uri if target_version_entity else 'unknown'}'"
+                )
+                status = "failed"
+                metrics = {
+                    "candidate_status": "artifact_unavailable",
+                    "p95_latency_ms": 0.0,
+                    "cost": {
+                        "value": 0.0,
+                        "currency": "USD",
+                        "mode": "estimated_local",
+                        "provider": "local",
+                    },
+                    "cost_per_request": 0.0,
+                }
+            else:
                 try:
                     regressor = joblib.load(target_version_entity.artifact_uri)
-                except Exception:
+                except Exception as load_err:
                     regressor = None
+                    reasons.append(f"candidate_artifact_corrupted: failed to deserialize model artifact ({load_err})")
+                    status = "failed"
 
-            # Fallback if artifact not on disk
-            if regressor is None:
-                from sklearn.linear_model import Ridge
-                alpha_val = 100.0 if "regress" in version.lower() else 1.0
-                regressor = Ridge(alpha=alpha_val).fit(X_test[:50], y_test[:50])
+                if regressor is not None:
+                    # 3. Generate held-out evaluation test split
+                    _, _, X_test, y_test = MLPlatformService._generate_synthetic_data(n_samples=500, random_state=100)
 
-            # 4. Measure actual inference latency and score empirical metrics
-            t0 = time.time()
-            preds = regressor.predict(X_test)
-            latency_ms = round((time.time() - t0) * 1000, 2)
+                    # 4. Measure repeated inference latency distribution (N=20)
+                    latencies_ms: list[float] = []
+                    for _ in range(20):
+                        t_s = time.perf_counter()
+                        regressor.predict(X_test[:25])
+                        latencies_ms.append((time.perf_counter() - t_s) * 1000.0)
 
-            rmse = float(np.sqrt(mean_squared_error(y_test, preds)))
-            mae = float(mean_absolute_error(y_test, preds))
-            r2 = float(r2_score(y_test, preds))
-            # Calculate classification accuracy on direction/trend
-            trend_actual = (y_test > np.median(y_test)).astype(int)
-            trend_pred = (preds > np.median(preds)).astype(int)
-            accuracy = float(np.mean(trend_actual == trend_pred))
+                    preds = regressor.predict(X_test)
+                    rmse = float(np.sqrt(mean_squared_error(y_test, preds)))
+                    mae = float(mean_absolute_error(y_test, preds))
+                    r2 = float(r2_score(y_test, preds))
+                    trend_actual = (y_test > np.median(y_test)).astype(int)
+                    trend_pred = (preds > np.median(preds)).astype(int)
+                    accuracy = float(np.mean(trend_actual == trend_pred))
 
-            metrics = {
-                "rmse": round(rmse, 4),
-                "mae": round(mae, 4),
-                "r2_score": round(r2, 4),
-                "accuracy": round(accuracy, 4),
-                "p95_latency_ms": latency_ms,
-                "test_eval_samples": len(y_test),
-            }
+                    min_lat = round(float(np.min(latencies_ms)), 2)
+                    median_lat = round(float(np.median(latencies_ms)), 2)
+                    mean_lat = round(float(np.mean(latencies_ms)), 2)
+                    p95_lat = round(float(np.percentile(latencies_ms, 95)), 2)
+                    max_lat = round(float(np.max(latencies_ms)), 2)
 
-            # 5. Evaluate against policy thresholds
-            if rmse > current_policy.max_rmse:
-                reasons.append(f"Model RMSE {rmse:.2f} exceeded maximum threshold of {current_policy.max_rmse:.2f}")
-            if accuracy < current_policy.min_accuracy:
-                reasons.append(f"Model accuracy {accuracy * 100:.1f}% below minimum threshold of {current_policy.min_accuracy * 100:.1f}%")
-            if latency_ms > current_policy.max_p95_latency_ms:
-                reasons.append(f"Inference latency {latency_ms:.1f}ms exceeded limit of {current_policy.max_p95_latency_ms:.1f}ms")
+                    cost_val = 0.0010
+                    metrics = {
+                        "rmse": round(rmse, 4),
+                        "mae": round(mae, 4),
+                        "r2_score": round(r2, 4),
+                        "accuracy": round(accuracy, 4),
+                        "min_latency_ms": min_lat,
+                        "median_latency_ms": median_lat,
+                        "avg_latency_ms": mean_lat,
+                        "p95_latency_ms": p95_lat,
+                        "max_latency_ms": max_lat,
+                        "test_eval_samples": len(y_test),
+                        "latency_measurements_count": len(latencies_ms),
+                        "cost": {
+                            "value": cost_val,
+                            "currency": "USD",
+                            "mode": "estimated_local",
+                            "provider": "local",
+                        },
+                        "cost_per_request": cost_val,
+                    }
+
+                    if rmse > current_policy.max_rmse:
+                        reasons.append(f"Model RMSE {rmse:.2f} exceeded maximum threshold of {current_policy.max_rmse:.2f}")
+                    if accuracy < current_policy.min_accuracy:
+                        reasons.append(f"Model accuracy {accuracy * 100:.1f}% below minimum threshold of {current_policy.min_accuracy * 100:.1f}%")
+                    if p95_lat > current_policy.max_p95_latency_ms:
+                        reasons.append(f"Inference latency {p95_lat:.1f}ms exceeded limit of {current_policy.max_p95_latency_ms:.1f}ms")
 
         elif workload.type in ["rag", "agent", "llm_service"]:
-            # 1. Fetch available knowledge base
-            res_kb = await db.execute(select(KnowledgeBase).limit(1))
-            first_kb = res_kb.scalar_one_or_none()
+            # 1. Empirical Tool Selection Accuracy (evaluate actual prompt router against benchmark)
+            tool_hits = 0
+            for tc in TOOL_BENCHMARK_CASES:
+                predicted_tool, _ = AgentRuntimeService.route_prompt_to_tool(tc["prompt"])
+                if predicted_tool == tc["expected_tool"]:
+                    tool_hits += 1
+            tool_selection_accuracy = round(tool_hits / len(TOOL_BENCHMARK_CASES), 4)
 
-            latencies: list[float] = []
-            retrieval_hits = 0
-            keyword_matches = 0
+            # 2. Fetch scoped knowledge base
+            res_kb = await db.execute(
+                select(KnowledgeBase).where(KnowledgeBase.project_id == workload.project_id)
+            )
+            kb = res_kb.scalar_one_or_none()
+            if not kb:
+                res_kb = await db.execute(
+                    select(KnowledgeBase)
+                    .join(Project, KnowledgeBase.project_id == Project.id)
+                    .where(Project.organization_id == org_id)
+                    .limit(1)
+                )
+                kb = res_kb.scalar_one_or_none()
 
-            # 2. Execute benchmark suite against candidate
-            for item in RAG_BENCHMARK_SUITE:
-                t_q = time.time()
+            query_latencies_ms: list[float] = []
+            recalls_at_3: list[float] = []
+            mrr_scores_at_3: list[float] = []
+            precisions_at_3: list[float] = []
+            faithfulness_scores: list[float] = []
+            correctness_scores: list[float] = []
+
+            # 3. Evaluate benchmark queries
+            for case in RAG_BENCHMARK_CASES:
                 results = []
-                if first_kb:
+                if kb:
+                    t_start = time.perf_counter()
                     results = await RAGPlatformService.query_knowledge_base(
                         db=db,
-                        knowledge_base_id=first_kb.id,
-                        query=item["query"],
+                        knowledge_base_id=kb.id,
+                        query=case["query"],
                         top_k=3,
                     )
-                q_latency = (time.time() - t_q) * 1000.0
-                latencies.append(q_latency)
+                    query_latencies_ms.append((time.perf_counter() - t_start) * 1000.0)
+                else:
+                    query_latencies_ms.append(10.0)
 
-                if results and results[0]["score"] >= item["min_expected_score"]:
-                    retrieval_hits += 1
-                    top_text = results[0]["text"].lower()
-                    if any(kw in top_text for kw in item["expected_keywords"]):
-                        keyword_matches += 1
+                hit_ranks: list[int] = []
+                retrieved_texts: list[str] = []
+                for rank_idx, chunk in enumerate(results):
+                    chunk_text = chunk.get("text", "").lower()
+                    retrieved_texts.append(chunk_text)
+                    source_id = chunk.get("document_id", "")
+                    is_relevant = (
+                        source_id in case["expected_sources"]
+                        or any(kw in chunk_text for kw in case["expected_keywords"])
+                    )
+                    if is_relevant:
+                        hit_ranks.append(rank_idx + 1)
 
-            total_q = len(RAG_BENCHMARK_SUITE)
-            context_recall = round(retrieval_hits / total_q, 2)
-            faithfulness = round(keyword_matches / total_q, 2) if retrieval_hits > 0 else 0.50
-            answer_correctness = round((context_recall * 0.5) + (faithfulness * 0.5), 2)
-            avg_latency = round(float(np.mean(latencies)), 2) if latencies else 150.0
-            p95_latency = round(float(np.percentile(latencies, 95)), 2) if latencies else 200.0
-            cost_per_req = 0.0032
+                if hit_ranks:
+                    recalls_at_3.append(1.0)
+                    mrr_scores_at_3.append(1.0 / hit_ranks[0])
+                    precisions_at_3.append(len(hit_ranks) / len(results) if results else 0.0)
+                else:
+                    recalls_at_3.append(0.0)
+                    mrr_scores_at_3.append(0.0)
+                    precisions_at_3.append(0.0)
 
+                all_context = " ".join(retrieved_texts)
+                matched_kws = [kw for kw in case["expected_keywords"] if kw in all_context]
+                faith = len(matched_kws) / len(case["expected_keywords"]) if case["expected_keywords"] else 1.0
+                faithfulness_scores.append(faith)
+
+                exp_tokens = set(case["expected_answer"].lower().split())
+                ctx_tokens = set(all_context.split())
+                tok_overlap = len(exp_tokens & ctx_tokens) / len(exp_tokens) if exp_tokens else 1.0
+                correctness_scores.append(round((faith * 0.5) + (tok_overlap * 0.5), 4))
+
+            # 4. Repeat measurements to reach N=20 for robust p95 distribution
+            if kb:
+                for rep in range(max(0, 20 - len(query_latencies_ms))):
+                    sample_q = RAG_BENCHMARK_CASES[rep % len(RAG_BENCHMARK_CASES)]["query"]
+                    t_rep = time.perf_counter()
+                    _ = await RAGPlatformService.query_knowledge_base(
+                        db=db,
+                        knowledge_base_id=kb.id,
+                        query=sample_q,
+                        top_k=3,
+                    )
+                    query_latencies_ms.append((time.perf_counter() - t_rep) * 1000.0)
+
+            min_lat = round(float(np.min(query_latencies_ms)), 2)
+            median_lat = round(float(np.median(query_latencies_ms)), 2)
+            mean_lat = round(float(np.mean(query_latencies_ms)), 2)
+            p95_lat = round(float(np.percentile(query_latencies_ms, 95)), 2)
+            max_lat = round(float(np.max(query_latencies_ms)), 2)
+
+            recall_at_3 = round(float(np.mean(recalls_at_3)), 4) if recalls_at_3 else 0.0
+            mrr_at_3 = round(float(np.mean(mrr_scores_at_3)), 4) if mrr_scores_at_3 else 0.0
+            precision_at_3 = round(float(np.mean(precisions_at_3)), 4) if precisions_at_3 else 0.0
+            faithfulness = round(float(np.mean(faithfulness_scores)), 4) if faithfulness_scores else 0.0
+            answer_correctness = round(float(np.mean(correctness_scores)), 4) if correctness_scores else 0.0
+
+            cost_val = 0.0032
             metrics = {
+                "recall_at_3": recall_at_3,
+                "mrr_at_3": mrr_at_3,
+                "precision_at_3": precision_at_3,
                 "faithfulness": faithfulness,
                 "answer_correctness": answer_correctness,
-                "context_recall": context_recall,
-                "tool_selection_accuracy": 0.95,
-                "avg_latency_ms": avg_latency,
-                "p95_latency_ms": p95_latency,
-                "cost_per_request": cost_per_req,
-                "eval_questions_tested": total_q,
+                "context_recall": recall_at_3,
+                "tool_selection_accuracy": tool_selection_accuracy,
+                "min_latency_ms": min_lat,
+                "median_latency_ms": median_lat,
+                "avg_latency_ms": mean_lat,
+                "p95_latency_ms": p95_lat,
+                "max_latency_ms": max_lat,
+                "cost": {
+                    "value": cost_val,
+                    "currency": "USD",
+                    "mode": "estimated_local",
+                    "provider": "local",
+                },
+                "cost_per_request": cost_val,
+                "eval_questions_tested": len(RAG_BENCHMARK_CASES),
+                "latency_measurements_count": len(query_latencies_ms),
             }
 
             if faithfulness < current_policy.min_faithfulness:
@@ -184,23 +332,23 @@ class EvaluationEngineService:
                 reasons.append(
                     f"Answer correctness ({answer_correctness * 100:.1f}%) is below required threshold ({current_policy.min_answer_correctness * 100:.1f}%)"
                 )
-            if p95_latency > current_policy.max_p95_latency_ms:
+            if p95_lat > current_policy.max_p95_latency_ms:
                 reasons.append(
-                    f"p95 latency ({p95_latency:.1f}ms) exceeded maximum threshold ({current_policy.max_p95_latency_ms:.1f}ms)"
+                    f"p95 latency ({p95_lat:.1f}ms) exceeded maximum threshold ({current_policy.max_p95_latency_ms:.1f}ms)"
                 )
-            if cost_per_req > current_policy.max_cost_per_request:
+            if cost_val > current_policy.max_cost_per_request:
                 reasons.append(
-                    f"Cost per request (${cost_per_req:.4f}) exceeded budget ceiling (${current_policy.max_cost_per_request:.4f})"
+                    f"Cost per request (${cost_val:.4f}) exceeded budget ceiling (${current_policy.max_cost_per_request:.4f})"
                 )
 
         # Gate Decision
-        passed = len(reasons) == 0
+        passed = (len(reasons) == 0) and (status != "failed")
         decision = "ALLOW" if passed else "BLOCK"
 
         eval_run = EvaluationRun(
             workload_id=workload_id,
             version=version,
-            status="completed",
+            status=status,
             metrics_json=metrics,
             passed=passed,
             decision=decision,
@@ -214,11 +362,13 @@ class EvaluationEngineService:
         EVALUATION_RUNS_TOTAL.labels(workload_id=workload_id, decision=decision).inc()
 
         audit = AuditEvent(
-            organization_id="org-demo-nuvorix",
+            organization_id=org_id,
             user_id=user_id,
             action="evaluations:run",
             resource_type="evaluation_run",
             resource_id=eval_run.id,
+            request_id=request_id,
+            actor_type="user",
             metadata_json={"version": version, "decision": decision, "passed": passed, "reasons": reasons},
         )
         db.add(audit)
@@ -237,4 +387,3 @@ class EvaluationEngineService:
             "started_at": eval_run.started_at,
             "completed_at": eval_run.completed_at,
         }
-

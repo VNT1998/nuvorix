@@ -29,8 +29,8 @@ class BaseLLMProvider(ABC):
         prompt: str,
         max_tokens: int = 512,
         temperature: float = 0.7,
-    ) -> tuple[str, int, int]:
-        """Returns tuple of (completion_text, input_tokens, output_tokens)."""
+    ) -> tuple[str, int, int, str]:
+        """Returns tuple of (completion_text, input_tokens, output_tokens, usage_source)."""
 
 
 class OpenAICompatibleProvider(BaseLLMProvider):
@@ -52,7 +52,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         prompt: str,
         max_tokens: int = 512,
         temperature: float = 0.7,
-    ) -> tuple[str, int, int]:
+    ) -> tuple[str, int, int, str]:
         if not self.api_key and "localhost" not in self.base_url and "127.0.0.1" not in self.base_url:
             raise ValueError("No API key configured for remote provider.")
 
@@ -74,9 +74,11 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             choice = data["choices"][0]
             text = choice.get("message", {}).get("content", "")
             usage = data.get("usage", {})
+            has_provider_usage = "prompt_tokens" in usage and "completion_tokens" in usage
             in_tok = usage.get("prompt_tokens", max(len(prompt) // 4, 1))
             out_tok = usage.get("completion_tokens", max(len(text) // 4, 1))
-            return text, in_tok, out_tok
+            usage_source = "provider" if has_provider_usage else "estimated"
+            return text, in_tok, out_tok, usage_source
 
 
 class LocalDeterministicProvider(BaseLLMProvider):
@@ -88,7 +90,7 @@ class LocalDeterministicProvider(BaseLLMProvider):
         prompt: str,
         max_tokens: int = 512,
         temperature: float = 0.7,
-    ) -> tuple[str, int, int]:
+    ) -> tuple[str, int, int, str]:
         input_tokens = max(len(prompt.split()) * 2, 1)
 
         # Generate contextual response based on prompt intent
@@ -108,7 +110,7 @@ class LocalDeterministicProvider(BaseLLMProvider):
             text = f"Nuvorix Gateway [{model}]: Processed request successfully under verified platform SLOs."
 
         output_tokens = max(len(text.split()) * 2, 1)
-        return text, input_tokens, output_tokens
+        return text, input_tokens, output_tokens, "estimated"
 
 
 class LLMGatewayService:
@@ -129,6 +131,8 @@ class LLMGatewayService:
         start_time = time.time()
         rates = PRICING_TABLE.get(provider, PRICING_TABLE["local"])
         status = "success"
+        actual_provider = "local"
+        usage_source = "estimated"
 
         # Route through provider abstraction with fallback
         response_text = ""
@@ -137,23 +141,26 @@ class LLMGatewayService:
 
         if provider in ["openai", "anthropic", "gemini"]:
             try:
-                response_text, input_tokens, output_tokens = await cls._remote_provider.generate(
+                response_text, input_tokens, output_tokens, usage_source = await cls._remote_provider.generate(
                     model=model,
                     prompt=prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
+                actual_provider = "openai_compatible"
             except Exception as e:
                 logger.warning("Remote provider '%s' failed or unconfigured (%s). Falling back to local provider.", provider, e)
                 status = "fallback"
-                response_text, input_tokens, output_tokens = await cls._local_provider.generate(
+                actual_provider = "local"
+                response_text, input_tokens, output_tokens, usage_source = await cls._local_provider.generate(
                     model=f"local-{model}",
                     prompt=prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
         else:
-            response_text, input_tokens, output_tokens = await cls._local_provider.generate(
+            actual_provider = "local"
+            response_text, input_tokens, output_tokens, usage_source = await cls._local_provider.generate(
                 model=model,
                 prompt=prompt,
                 max_tokens=max_tokens,
@@ -165,6 +172,7 @@ class LLMGatewayService:
             (input_tokens / 1000.0) * rates["input_per_1k"]
             + (output_tokens / 1000.0) * rates["output_per_1k"]
         )
+        cost_mode = "provider_reported" if (status == "success" and actual_provider == "openai_compatible" and usage_source == "provider") else "estimated_local"
 
         # Log into Database
         log_entry = LLMUsageLog(
@@ -198,6 +206,8 @@ class LLMGatewayService:
         return {
             "id": log_entry.id,
             "provider": provider,
+            "requested_provider": provider,
+            "actual_provider": actual_provider,
             "model": model,
             "response": response_text,
             "input_tokens": input_tokens,
@@ -205,6 +215,9 @@ class LLMGatewayService:
             "latency_ms": latency_ms,
             "estimated_cost": round(cost, 6),
             "status": status,
+            "usage_source": usage_source,
+            "cost_mode": cost_mode,
+            "pricing_source": "centralized_catalog",
         }
 
 
