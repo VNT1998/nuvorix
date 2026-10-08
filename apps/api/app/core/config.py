@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     
     # MLflow
-    MLFLOW_TRACKING_URI: str = "file:./mlruns"
+    MLFLOW_TRACKING_URI: str = "sqlite:///mlflow.db"
     
     # Security & RBAC
     AUTH_ENABLED: bool = False

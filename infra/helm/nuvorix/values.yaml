@@ -1,0 +1,99 @@
+global:
+  environment: production
+  domain: nuvorix.internal
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: "nuvorix-sa"
+  annotations: {}
+
+api:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/vnt1998/nuvorix-api
+    tag: 0.1.0
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  env:
+    LOG_LEVEL: info
+    PROMETHEUS_ENABLED: "true"
+    MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
+    OTEL_ENDPOINT: "http://otel-collector.monitoring:4317"
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 80
+
+web:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/vnt1998/nuvorix-web
+    tag: 0.1.0
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+database:
+  type: external
+  url: "sqlite+aiosqlite:///./nuvorix.db"
+  postgresql:
+    enabled: false
+    host: postgresql.database
+    port: 5432
+    database: nuvorix
+    username: nuvorix_user
+
+redis:
+  enabled: false
+  url: "redis://redis-master:6379/0"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+  hosts:
+    - host: console.nuvorix.internal
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web
+    - host: api.nuvorix.internal
+      paths:
+        - path: /
+          pathType: Prefix
+          service: api
+  tls:
+    - secretName: nuvorix-tls
+      hosts:
+        - console.nuvorix.internal
+        - api.nuvorix.internal
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    path: /metrics

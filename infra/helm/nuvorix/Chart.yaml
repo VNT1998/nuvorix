@@ -1,0 +1,17 @@
+apiVersion: v2
+name: nuvorix
+description: Enterprise Helm chart for Nuvorix AI/ML Production Platform Control Plane
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ai
+  - mlops
+  - llm-gateway
+  - rag
+  - langgraph
+  - mlflow
+  - kubernetes
+maintainers:
+  - name: Nuvorix Core Team
+    email: maintainers@nuvorix.local

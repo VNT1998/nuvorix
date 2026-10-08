@@ -196,6 +196,23 @@ class ToolDeclaration(BaseModel):
     description: str
     risk: str  # low, high
     required_permissions: list[str]
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPCallToolRequest(BaseModel):
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    allow_high_risk: bool = False
+
+
+class MCPContentItem(BaseModel):
+    type: str = "text"
+    text: str
+
+
+class MCPCallToolResponse(BaseModel):
+    content: list[MCPContentItem]
+    isError: bool = False
 
 
 # --- Evaluation Engine ---

@@ -112,3 +112,19 @@ async def promote_model_version(
         return res
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/workloads/{workload_id}/mlflow-runs")
+async def get_workload_mlflow_runs(
+    workload_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: UserSession = Depends(get_current_user),
+):
+    from apps.api.app.models.entities import Workload
+    res = await db.execute(select(Workload).where(Workload.id == workload_id))
+    workload = res.scalar_one_or_none()
+    if not workload:
+        raise HTTPException(status_code=404, detail="Workload not found")
+    runs = MLPlatformService.get_runs_for_workload(workload.name)
+    return {"workload_id": workload_id, "experiment": f"nuvorix-{workload.name}", "runs": runs}
+

@@ -1,4 +1,87 @@
+import threading
+from collections import deque
+from collections.abc import Sequence
+from contextlib import contextmanager
+from typing import Any
+
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
+
+# --- OpenTelemetry Tracing Infrastructure ---
+
+class RingBufferSpanExporter(SpanExporter):
+    """Thread-safe ring buffer storing recent spans for real-time observability."""
+    def __init__(self, maxlen: int = 200):
+        self._spans: deque = deque(maxlen=maxlen)
+        self._lock = threading.Lock()
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        with self._lock:
+            for s in spans:
+                start_ns = s.start_time or 0
+                end_ns = s.end_time or 0
+                duration_ms = round((end_ns - start_ns) / 1_000_000.0, 2) if end_ns > start_ns else 0.0
+
+                self._spans.append({
+                    "name": s.name,
+                    "trace_id": format(s.context.trace_id, "032x"),
+                    "span_id": format(s.context.span_id, "016x"),
+                    "parent_id": format(s.parent.span_id, "016x") if s.parent else None,
+                    "duration_ms": duration_ms,
+                    "status": s.status.status_code.name,
+                    "attributes": dict(s.attributes) if s.attributes else {},
+                })
+        return SpanExportResult.SUCCESS
+
+    def get_recent_spans(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return list(self._spans)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._spans.clear()
+
+    def shutdown(self) -> None:
+        pass
+
+
+_resource = Resource.create({
+    "service.name": "nuvorix-control-plane",
+    "service.version": "0.1.0",
+    "deployment.environment": "development",
+})
+_provider = TracerProvider(resource=_resource)
+_span_exporter = RingBufferSpanExporter(maxlen=200)
+_provider.add_span_processor(SimpleSpanProcessor(_span_exporter))
+trace.set_tracer_provider(_provider)
+
+tracer: trace.Tracer = trace.get_tracer("nuvorix-control-plane", "0.1.0")
+
+
+def get_tracer() -> trace.Tracer:
+    return tracer
+
+
+def get_recent_spans() -> list[dict[str, Any]]:
+    """Retrieve recently captured distributed trace spans."""
+    return _span_exporter.get_recent_spans()
+
+
+@contextmanager
+def trace_span(name: str, attributes: dict[str, Any] | None = None):
+    """Context manager to create and record an OpenTelemetry trace span."""
+    with tracer.start_as_current_span(name) as span:
+        if attributes:
+            for k, v in attributes.items():
+                if v is not None:
+                    span.set_attribute(k, str(v) if isinstance(v, (dict, list, bool)) else v)
+        yield span
+
+
+# --- Prometheus Metrics ---
 
 # HTTP Metrics
 HTTP_REQUESTS_TOTAL = Counter(
@@ -110,3 +193,4 @@ def record_llm_usage(
     LLM_INPUT_TOKENS_TOTAL.labels(provider=provider, model=model).inc(input_tokens)
     LLM_OUTPUT_TOKENS_TOTAL.labels(provider=provider, model=model).inc(output_tokens)
     LLM_COST_TOTAL.labels(provider=provider, model=model).inc(cost)
+

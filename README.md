@@ -223,10 +223,10 @@ if eval_res["decision"] == "ALLOW":
 
 ## 🧪 Testing & Code Quality
 
-Nuvorix has an automated test suite verifying database operations, scikit-learn training, RAG vector retrieval, LangGraph agent tool loops, release policy evaluation gates, Blue/Green deployments, and incident rollbacks.
+Nuvorix has an automated test suite verifying database operations, real MLflow model training and run registration, RAG vector retrieval, real LangGraph agent state machine loops, OpenTelemetry distributed tracing spans, standard MCP protocol endpoints, release policy evaluation gates, Blue/Green deployments, and incident rollbacks.
 
 ```bash
-# Run full pytest test suite (11 passed)
+# Run full pytest test suite (15 passed)
 uv run pytest
 
 # Run Ruff linter & type checks
@@ -238,7 +238,41 @@ cd apps/web && npm run build
 
 ---
 
-## 🐳 Docker Compose & Kubernetes (`kind`)
+## ☸️ Cloud-Native Deployment (Helm & Terraform)
+
+### Production Helm Chart
+Deploy Nuvorix to any Kubernetes cluster (EKS, GKE, AKS, or local kind):
+```bash
+# Install or upgrade Nuvorix via Helm
+helm upgrade --install nuvorix ./infra/helm/nuvorix \
+  --namespace nuvorix \
+  --create-namespace \
+  --values ./infra/helm/nuvorix/values.yaml
+```
+
+The Helm chart includes:
+- Production deployments and services for `api` and `web`
+- Horizontal Pod Autoscaler (`HPA`) based on CPU & Memory utilization
+- Ingress with TLS secret configuration and routing
+- ConfigMaps & Secrets for environment variable management
+- ServiceAccount with granular role definitions
+
+### Infrastructure as Code (Terraform)
+Automate cluster provisioning and Nuvorix deployment:
+```bash
+cd infra/terraform/environments/dev
+terraform init
+terraform plan
+terraform apply
+```
+
+Includes modular components:
+- `modules/nuvorix_cluster`: Kubernetes namespace, Helm release, and ingress setup
+- `modules/storage`: Persistent volume claim management for model artifacts
+
+---
+
+## 🐳 Docker Compose & Local Kubernetes (`kind`)
 
 ### Docker Compose
 Run the entire platform (API, Web, PostgreSQL with pgvector, and Redis):
@@ -293,8 +327,12 @@ nuvorix/
 │   ├── cli/                    # Click Python CLI (nuvorix)
 │   └── sdk-python/             # Python SDK client (NuvorixClient)
 ├── infra/
+│   ├── helm/nuvorix/           # Enterprise Helm chart (API, Web, Ingress, HPA, ConfigMaps)
+│   ├── terraform/              # Terraform IaC modules and dev environment
 │   ├── compose/
 │   └── kind/                   # Kubernetes Deployment, Service, ConfigMap manifests
+├── .github/
+│   └── workflows/              # CI/CD (Ruff lint, Pytest, Vite build, Wheel packaging)
 ├── docs/
 │   ├── screenshots/            # High-resolution platform tour screenshots
 │   └── IMPLEMENTATION_STATUS.md # Master build specification tracker

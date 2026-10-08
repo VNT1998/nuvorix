@@ -48,22 +48,34 @@ app.add_middleware(
 )
 
 
-# HTTP Request Metrics Middleware
+# HTTP Request Metrics & OpenTelemetry Tracing Middleware
 @app.middleware("http")
 async def telemetry_middleware(request: Request, call_next):
     start_time = time.time()
-    response = await call_next(request)
-    duration = time.time() - start_time
     
-    # Avoid recording /metrics to avoid self-amplifying metrics
-    if not request.url.path.startswith("/metrics"):
+    # Avoid recording /metrics or /telemetry/traces to avoid recursive trace generation
+    if request.url.path in ("/metrics", "/telemetry/traces"):
+        return await call_next(request)
+
+    from apps.api.app.core.telemetry import tracer
+
+    with tracer.start_as_current_span(f"{request.method} {request.url.path}") as span:
+        span.set_attribute("http.method", request.method)
+        span.set_attribute("http.url", str(request.url))
+        span.set_attribute("http.route", request.url.path)
+
+        response = await call_next(request)
+        duration = time.time() - start_time
+
+        span.set_attribute("http.status_code", response.status_code)
         record_http_request(
             method=request.method,
             endpoint=request.url.path,
             status_code=response.status_code,
             duration_sec=duration,
         )
-    return response
+        return response
+
 
 
 # Mount Health & Telemetry Routes

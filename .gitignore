@@ -42,6 +42,10 @@ nuvorix.db
 nuvorix.db-journal
 nuvorix.db-wal
 nuvorix.db-shm
+mlflow.db
+mlflow.db-journal
+mlflow.db-wal
+mlflow.db-shm
 mlruns/
 artifacts/
 

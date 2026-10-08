@@ -1,0 +1,4 @@
+kubeconfig_path = "~/.kube/config"
+namespace       = "nuvorix-dev"
+domain          = "dev.nuvorix.local"
+helm_chart_path = "../../../helm/nuvorix"

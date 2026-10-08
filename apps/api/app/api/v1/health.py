@@ -51,3 +51,11 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
 async def metrics():
     content = get_metrics_payload()
     return Response(content=content, media_type=CONTENT_TYPE_LATEST)
+
+
+@router.get("/telemetry/traces")
+async def get_telemetry_traces():
+    """Retrieve live distributed trace spans recorded by OpenTelemetry."""
+    from apps.api.app.core.telemetry import get_recent_spans
+    return {"spans": get_recent_spans(), "count": len(get_recent_spans())}
+

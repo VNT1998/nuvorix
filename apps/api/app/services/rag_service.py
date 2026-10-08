@@ -6,7 +6,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.app.core.telemetry import RETRIEVAL_LATENCY_SECONDS
+from apps.api.app.core.telemetry import RETRIEVAL_LATENCY_SECONDS, trace_span
 from apps.api.app.models.entities import (
     AuditEvent,
     KnowledgeBase,
@@ -147,48 +147,49 @@ class RAGPlatformService:
         top_k: int = 4,
         min_score: float = 0.0,
     ) -> list[dict[str, Any]]:
-        start_time = time.time()
-        
-        # 1. Generate query embedding
-        query_vec = np.array(cls.generate_embedding(query), dtype=float)
-
-        # 2. Fetch all chunks in this knowledge base
-        res = await db.execute(
-            select(KnowledgeChunk).where(KnowledgeChunk.knowledge_base_id == knowledge_base_id)
-        )
-        chunks = res.scalars().all()
-
-        scored_results: list[tuple[float, KnowledgeChunk]] = []
-        for ch in chunks:
-            if not ch.embedding_json:
-                continue
-            chunk_vec = np.array(ch.embedding_json, dtype=float)
-            score = float(np.dot(query_vec, chunk_vec))
+        with trace_span("rag.vector_retrieval", {"knowledge_base_id": knowledge_base_id, "query_terms": len(query.split()), "top_k": top_k}):
+            start_time = time.time()
             
-            # Additional exact keyword boost for high precision
-            query_terms = set(query.lower().split())
-            chunk_terms = set(ch.content.lower().split())
-            overlap_ratio = len(query_terms.intersection(chunk_terms)) / max(len(query_terms), 1)
-            final_score = min(score * 0.7 + overlap_ratio * 0.3, 0.99)
-            
-            if final_score >= min_score:
-                scored_results.append((final_score, ch))
+            # 1. Generate query embedding
+            query_vec = np.array(cls.generate_embedding(query), dtype=float)
 
-        # 3. Sort by score descending
-        scored_results.sort(key=lambda x: x[0], reverse=True)
-        top_results = scored_results[:top_k]
+            # 2. Fetch all chunks in this knowledge base
+            res = await db.execute(
+                select(KnowledgeChunk).where(KnowledgeChunk.knowledge_base_id == knowledge_base_id)
+            )
+            chunks = res.scalars().all()
 
-        duration = time.time() - start_time
-        RETRIEVAL_LATENCY_SECONDS.labels(knowledge_base_id=knowledge_base_id).observe(duration)
+            scored_results: list[tuple[float, KnowledgeChunk]] = []
+            for ch in chunks:
+                if not ch.embedding_json:
+                    continue
+                chunk_vec = np.array(ch.embedding_json, dtype=float)
+                score = float(np.dot(query_vec, chunk_vec))
+                
+                # Additional exact keyword boost for high precision
+                query_terms = set(query.lower().split())
+                chunk_terms = set(ch.content.lower().split())
+                overlap_ratio = len(query_terms.intersection(chunk_terms)) / max(len(query_terms), 1)
+                final_score = min(score * 0.7 + overlap_ratio * 0.3, 0.99)
+                
+                if final_score >= min_score:
+                    scored_results.append((final_score, ch))
 
-        formatted: list[dict[str, Any]] = []
-        for score, ch in top_results:
-            formatted.append({
-                "chunk_id": ch.id,
-                "document_id": ch.document_id,
-                "score": round(max(score, 0.0), 4),
-                "source": ch.metadata_json.get("source", "unknown"),
-                "title": ch.metadata_json.get("title", "Untitled"),
-                "text": ch.content,
-            })
-        return formatted
+            # 3. Sort by score descending
+            scored_results.sort(key=lambda x: x[0], reverse=True)
+            top_results = scored_results[:top_k]
+
+            duration = time.time() - start_time
+            RETRIEVAL_LATENCY_SECONDS.labels(knowledge_base_id=knowledge_base_id).observe(duration)
+
+            formatted: list[dict[str, Any]] = []
+            for score, ch in top_results:
+                formatted.append({
+                    "chunk_id": ch.id,
+                    "document_id": ch.document_id,
+                    "score": round(max(score, 0.0), 4),
+                    "source": ch.metadata_json.get("source", "unknown"),
+                    "title": ch.metadata_json.get("title", "Untitled"),
+                    "text": ch.content,
+                })
+            return formatted
