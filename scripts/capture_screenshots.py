@@ -76,6 +76,7 @@ def main():
                 "--no-sandbox",
                 "--hide-scrollbars",
                 "--window-size=1440,900",
+                "--virtual-time-budget=3000",
                 f"--screenshot={output_file.resolve()}",
                 target_url,
             ]
