@@ -1,5 +1,5 @@
 global:
-  environment: production
+  environment: staging
   domain: nuvorix.internal
 
 nameOverride: ""
@@ -10,8 +10,11 @@ serviceAccount:
   name: "nuvorix-sa"
   annotations: {}
 
+secrets:
+  existingSecret: ""
+
 api:
-  replicaCount: 3
+  replicaCount: 2
   image:
     repository: ghcr.io/vnt1998/nuvorix-api
     tag: 0.1.0
@@ -21,20 +24,20 @@ api:
     port: 8000
   resources:
     limits:
-      cpu: 2000m
-      memory: 4Gi
+      cpu: 1000m
+      memory: 2Gi
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 250m
+      memory: 512Mi
   env:
     LOG_LEVEL: info
     PROMETHEUS_ENABLED: "true"
-    MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
-    OTEL_ENDPOINT: "http://otel-collector.monitoring:4317"
+    MLFLOW_TRACKING_URI: ""
+    OTEL_ENDPOINT: ""
   autoscaling:
-    enabled: true
+    enabled: false
     minReplicas: 2
-    maxReplicas: 10
+    maxReplicas: 5
     targetCPUUtilizationPercentage: 75
     targetMemoryUtilizationPercentage: 80
 
@@ -56,24 +59,23 @@ web:
       memory: 128Mi
 
 database:
-  type: external
-  url: "sqlite+aiosqlite:///./nuvorix.db"
+  type: postgresql
+  url: ""
   postgresql:
-    enabled: false
+    enabled: true
     host: postgresql.database
     port: 5432
     database: nuvorix
     username: nuvorix_user
 
 redis:
-  enabled: false
+  enabled: true
   url: "redis://redis-master:6379/0"
 
 ingress:
   enabled: true
   className: "nginx"
   annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/proxy-body-size: "64m"
   hosts:
     - host: console.nuvorix.internal

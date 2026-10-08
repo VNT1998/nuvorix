@@ -23,6 +23,7 @@ data:
   MLFLOW_TRACKING_URI: {{ .Values.api.env.MLFLOW_TRACKING_URI | quote }}
   OTEL_ENDPOINT: {{ .Values.api.env.OTEL_ENDPOINT | quote }}
   PROMETHEUS_ENABLED: {{ .Values.api.env.PROMETHEUS_ENABLED | quote }}
+{{- if not .Values.secrets.existingSecret }}
 ---
 apiVersion: v1
 kind: Secret
@@ -32,5 +33,5 @@ metadata:
     {{- include "nuvorix.labels" . | nindent 4 }}
 type: Opaque
 stringData:
-  SECRET_KEY: "nuvorix-prod-generated-secret-key-change-me"
   DATABASE_URL: {{ .Values.database.url | quote }}
+{{- end }}

@@ -1,0 +1,39 @@
+global:
+  environment: development
+  domain: nuvorix.local
+
+secrets:
+  existingSecret: ""
+
+api:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  env:
+    LOG_LEVEL: debug
+    PROMETHEUS_ENABLED: "true"
+    MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
+    OTEL_ENDPOINT: ""
+  autoscaling:
+    enabled: false
+
+web:
+  replicaCount: 1
+
+database:
+  type: sqlite
+  url: "sqlite+aiosqlite:///./nuvorix.db"
+  postgresql:
+    enabled: false
+
+redis:
+  enabled: false
+  url: ""
+
+ingress:
+  enabled: false

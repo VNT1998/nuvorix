@@ -52,3 +52,31 @@ jobs:
       - name: Build Web Console (Vite)
         working-directory: apps/web
         run: npm run build
+
+  infra-validation:
+    name: Infrastructure Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive infra/terraform
+
+      - name: Terraform Init Dev
+        run: terraform -chdir=infra/terraform/environments/dev init -backend=false
+
+      - name: Terraform Validate Dev
+        run: terraform -chdir=infra/terraform/environments/dev validate
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.15.0"
+
+      - name: Helm Lint
+        run: helm lint infra/helm/nuvorix

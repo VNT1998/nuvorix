@@ -1,0 +1,85 @@
+global:
+  environment: production
+  domain: nuvorix.internal
+
+secrets:
+  # In production, credentials must be supplied via an external Kubernetes Secret
+  existingSecret: "nuvorix-production-credentials"
+
+api:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/vnt1998/nuvorix-api
+    tag: 0.1.0
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  env:
+    LOG_LEVEL: info
+    PROMETHEUS_ENABLED: "true"
+    MLFLOW_TRACKING_URI: "http://mlflow.mlops.svc.cluster.local:5000"
+    OTEL_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318"
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 80
+
+web:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+
+database:
+  type: postgresql
+  url: "postgresql+asyncpg://nuvorix_app@postgres-cluster.database.svc.cluster.local:5432/nuvorix_production"
+  postgresql:
+    enabled: false
+    host: postgres-cluster.database.svc.cluster.local
+    port: 5432
+    database: nuvorix_production
+    username: nuvorix_app
+
+redis:
+  enabled: true
+  url: "redis://redis-cluster.cache.svc.cluster.local:6379/0"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+  hosts:
+    - host: console.nuvorix.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web
+    - host: api.nuvorix.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: api
+  tls:
+    - secretName: nuvorix-prod-tls
+      hosts:
+        - console.nuvorix.com
+        - api.nuvorix.com
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    path: /metrics
