@@ -2,8 +2,6 @@ import logging
 import time
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 import numpy as np
 from fastembed import TextEmbedding
 from sqlalchemy import select
@@ -15,7 +13,10 @@ from apps.api.app.models.entities import (
     KnowledgeBase,
     KnowledgeChunk,
     KnowledgeDocument,
+    Project,
 )
+
+logger = logging.getLogger(__name__)
 
 _EMBEDDING_MODEL: TextEmbedding | None = None
 
@@ -35,6 +36,7 @@ class RAGPlatformService:
     def generate_embedding(cls, text: str) -> list[float]:
         """
         Generate a real dense semantic vector embedding using BAAI/bge-small-en-v1.5.
+        Output vector is unit-normalized (L2 norm = 1.0) so dot product equals cosine similarity.
         """
         cleaned = text.strip() or "empty"
         model = get_embedding_model()
@@ -47,7 +49,7 @@ class RAGPlatformService:
 
     @classmethod
     def generate_embeddings_batch(cls, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings in batch for high ingestion throughput."""
+        """Generate embeddings in batch for high ingestion throughput with unit normalization."""
         if not texts:
             return []
         cleaned = [t.strip() or "empty" for t in texts]
@@ -91,12 +93,20 @@ class RAGPlatformService:
         content: str,
         source_uri: str = "manual_upload",
         user_id: str = "usr-demo-admin",
+        org_id: str | None = None,
     ) -> KnowledgeDocument:
-        # 1. Verify knowledge base exists
-        res_kb = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == knowledge_base_id))
+        # 1. Verify knowledge base exists and belongs to the caller's organization
+        query = select(KnowledgeBase).join(Project, KnowledgeBase.project_id == Project.id).where(KnowledgeBase.id == knowledge_base_id)
+        if org_id:
+            query = query.where(Project.organization_id == org_id)
+        res_kb = await db.execute(query)
         kb = res_kb.scalar_one_or_none()
         if not kb:
-            raise ValueError(f"Knowledge base with id '{knowledge_base_id}' not found.")
+            raise ValueError(f"Knowledge base with id '{knowledge_base_id}' not found or unauthorized.")
+
+        res_p = await db.execute(select(Project).where(Project.id == kb.project_id))
+        proj = res_p.scalar_one_or_none()
+        audit_org = proj.organization_id if proj else (org_id or "org-demo-nuvorix")
 
         # 2. Create document record
         doc = KnowledgeDocument(
@@ -137,7 +147,7 @@ class RAGPlatformService:
         doc.status = "indexed"
 
         audit = AuditEvent(
-            organization_id="org-demo-nuvorix",
+            organization_id=audit_org,
             user_id=user_id,
             action="knowledge:ingest",
             resource_type="document",
@@ -157,11 +167,29 @@ class RAGPlatformService:
         query: str,
         top_k: int = 4,
         min_score: float = 0.0,
+        org_id: str | None = None,
     ) -> list[dict[str, Any]]:
+        """
+        Execute semantic retrieval with consistent score semantics across backends:
+        - Embeddings are L2 unit-normalized.
+        - similarity = dot(query_vec, chunk_vec) in range [0.0, 1.0].
+        - distance = 1.0 - similarity.
+        - Filters by min_score and respects tenant boundaries.
+        """
+        # Tenant ownership validation
+        if org_id:
+            res_kb = await db.execute(
+                select(KnowledgeBase)
+                .join(Project, KnowledgeBase.project_id == Project.id)
+                .where(KnowledgeBase.id == knowledge_base_id, Project.organization_id == org_id)
+            )
+            if not res_kb.scalar_one_or_none():
+                raise ValueError(f"Knowledge base '{knowledge_base_id}' not found or unauthorized.")
+
         with trace_span("rag.vector_retrieval", {"knowledge_base_id": knowledge_base_id, "query_terms": len(query.split()), "top_k": top_k}):
             start_time = time.time()
             
-            # 1. Generate real query embedding
+            # 1. Generate real query embedding (unit-normalized)
             query_vec = np.array(cls.generate_embedding(query), dtype=float)
 
             # 2. Check if database supports native pgvector cosine distance query
@@ -169,24 +197,32 @@ class RAGPlatformService:
             if bind and bind.dialect.name == "postgresql":
                 try:
                     stmt = (
-                        select(KnowledgeChunk)
+                        select(
+                            KnowledgeChunk,
+                            KnowledgeChunk.embedding.cosine_distance(query_vec.tolist()).label("distance"),
+                        )
                         .where(KnowledgeChunk.knowledge_base_id == knowledge_base_id)
-                        .order_by(KnowledgeChunk.embedding.cosine_distance(query_vec.tolist()))
+                        .order_by("distance")
                         .limit(top_k)
                     )
                     res = await db.execute(stmt)
-                    chunks = res.scalars().all()
+                    rows = res.all()
                     
                     formatted: list[dict[str, Any]] = []
-                    for ch in chunks:
-                        formatted.append({
-                            "chunk_id": ch.id,
-                            "document_id": ch.document_id,
-                            "score": 0.95,  # cosine distance ordered
-                            "source": ch.metadata_json.get("source", "unknown"),
-                            "title": ch.metadata_json.get("title", "Untitled"),
-                            "text": ch.content,
-                        })
+                    for ch, dist in rows:
+                        dist_val = float(dist)
+                        # Cosine similarity for normalized vectors is (1.0 - distance)
+                        sim = max(0.0, min(1.0, 1.0 - dist_val))
+                        if sim >= min_score:
+                            formatted.append({
+                                "chunk_id": ch.id,
+                                "document_id": ch.document_id,
+                                "score": round(sim, 4),
+                                "distance": round(dist_val, 4),
+                                "source": ch.metadata_json.get("source", "unknown"),
+                                "title": ch.metadata_json.get("title", "Untitled"),
+                                "text": ch.content,
+                            })
                     duration = time.time() - start_time
                     RETRIEVAL_LATENCY_SECONDS.labels(knowledge_base_id=knowledge_base_id).observe(duration)
                     return formatted
@@ -199,39 +235,36 @@ class RAGPlatformService:
             )
             chunks = res.scalars().all()
 
-            scored_results: list[tuple[float, KnowledgeChunk]] = []
+            scored_results: list[tuple[float, float, KnowledgeChunk]] = []
             for ch in chunks:
                 vec_data = ch.embedding if ch.embedding is not None else ch.embedding_json
                 if not vec_data:
                     continue
                 chunk_vec = np.array(vec_data, dtype=float)
-                score = float(np.dot(query_vec, chunk_vec))
+                # Dot product of normalized vectors equals cosine similarity
+                dot_sim = float(np.dot(query_vec, chunk_vec))
+                sim = max(0.0, min(1.0, dot_sim))
+                dist = max(0.0, min(1.0, 1.0 - sim))
                 
-                # Hybrid semantic + keyword overlap boost for precision
-                query_terms = set(query.lower().split())
-                chunk_terms = set(ch.content.lower().split())
-                overlap_ratio = len(query_terms.intersection(chunk_terms)) / max(len(query_terms), 1)
-                final_score = min(score * 0.8 + overlap_ratio * 0.2, 0.99)
-                
-                if final_score >= min_score:
-                    scored_results.append((final_score, ch))
+                if sim >= min_score:
+                    scored_results.append((sim, dist, ch))
 
-            # Sort by semantic score descending
+            # Sort by semantic similarity descending
             scored_results.sort(key=lambda x: x[0], reverse=True)
             top_results = scored_results[:top_k]
 
-            duration = time.time() - start_time
-            RETRIEVAL_LATENCY_SECONDS.labels(knowledge_base_id=knowledge_base_id).observe(duration)
-
-            formatted_results: list[dict[str, Any]] = []
-            for score, ch in top_results:
-                formatted_results.append({
+            formatted_fallback: list[dict[str, Any]] = []
+            for sim, dist, ch in top_results:
+                formatted_fallback.append({
                     "chunk_id": ch.id,
                     "document_id": ch.document_id,
-                    "score": round(max(score, 0.0), 4),
+                    "score": round(sim, 4),
+                    "distance": round(dist, 4),
                     "source": ch.metadata_json.get("source", "unknown"),
                     "title": ch.metadata_json.get("title", "Untitled"),
                     "text": ch.content,
                 })
-            return formatted_results
 
+            duration = time.time() - start_time
+            RETRIEVAL_LATENCY_SECONDS.labels(knowledge_base_id=knowledge_base_id).observe(duration)
+            return formatted_fallback
