@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,7 @@ async def _verify_workload_org(db: AsyncSession, workload_id: str, org_id: str) 
 async def create_deployment(
     workload_id: str,
     payload: DeploymentCreate,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     user: UserSession = Depends(require_permission("deployments:create")),
 ):
@@ -39,6 +40,8 @@ async def create_deployment(
             environment=payload.environment,
             strategy=payload.strategy,
             user_id=user.user_id,
+            org_id=user.organization_id,
+            idempotency_key=idempotency_key,
         )
         return dep
     except ValueError as e:
@@ -76,6 +79,7 @@ async def list_all_deployments(
 @router.post("/deployments/{deployment_id}/rollback", response_model=RollbackResponse)
 async def rollback_deployment(
     deployment_id: str,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     user: UserSession = Depends(require_permission("deployments:rollback")),
 ):
@@ -93,6 +97,8 @@ async def rollback_deployment(
             db=db,
             deployment_id=deployment_id,
             user_id=user.user_id,
+            org_id=user.organization_id,
+            idempotency_key=idempotency_key,
         )
         return RollbackResponse(**res)
     except ValueError as e:
