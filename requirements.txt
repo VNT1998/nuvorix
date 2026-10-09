@@ -144,7 +144,7 @@ httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscrip
     # via httpx2
 huey==3.4.0
     # via mlflow
-huggingface-hub==1.33.0
+huggingface-hub==2.1.1
     # via
     #   fastembed
     #   tokenizers
