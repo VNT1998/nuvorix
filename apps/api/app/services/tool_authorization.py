@@ -51,7 +51,7 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
     "emergency_circuit_breaker": {
         "name": "emergency_circuit_breaker",
-        "description": "Irreversible safety action: cuts traffic to 0% and sets deployment status to circuit_open.",
+        "description": "Logical deployment-state circuit breaker: cuts traffic to 0% and sets deployment status to circuit_open.",
         "risk": "high",
         "required_permissions": ["deployments:rollback"],
         "side_effect": True,

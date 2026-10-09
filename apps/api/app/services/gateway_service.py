@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +19,32 @@ PRICING_TABLE = {
     "openai": {"input_per_1k": 0.0025, "output_per_1k": 0.0100},
     "anthropic": {"input_per_1k": 0.0030, "output_per_1k": 0.0150},
     "gemini": {"input_per_1k": 0.0005, "output_per_1k": 0.0015},
+    "ollama": {"input_per_1k": 0.0001, "output_per_1k": 0.0002},
 }
+
+
+def calculate_token_cost(provider: str, model: str, input_tokens: int, output_tokens: int) -> float:
+    rates = PRICING_TABLE.get(provider, PRICING_TABLE["local"])
+    cost = (input_tokens / 1000.0) * rates["input_per_1k"] + (output_tokens / 1000.0) * rates["output_per_1k"]
+    return round(cost, 6)
+
+
+class ProviderResult(BaseModel):
+    id: str | None = None
+    provider: str
+    requested_provider: str
+    actual_provider: str
+    model: str
+    response: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: float
+    estimated_cost: float
+    status: str
+    usage_source: str
+    cost_mode: str
+    pricing_source: str = "centralized_catalog"
+    fallback_reason: str | None = None
 
 
 class BaseLLMProvider(ABC):
@@ -129,17 +155,17 @@ class LLMGatewayService:
         temperature: float = 0.7,
     ) -> dict[str, Any]:
         start_time = time.time()
-        rates = PRICING_TABLE.get(provider, PRICING_TABLE["local"])
         status = "success"
-        actual_provider = "local"
+        actual_provider = "local_demo_provider" if provider == "local" else provider
         usage_source = "estimated"
+        fallback_reason = None
 
         # Route through provider abstraction with fallback
         response_text = ""
         input_tokens = 0
         output_tokens = 0
 
-        if provider in ["openai", "anthropic", "gemini"]:
+        if provider in ["openai", "anthropic", "gemini", "ollama"]:
             try:
                 response_text, input_tokens, output_tokens, usage_source = await cls._remote_provider.generate(
                     model=model,
@@ -149,9 +175,18 @@ class LLMGatewayService:
                 )
                 actual_provider = "openai_compatible"
             except Exception as e:
-                logger.warning("Remote provider '%s' failed or unconfigured (%s). Falling back to local provider.", provider, e)
+                from apps.api.app.core.config import settings
+
+                if settings.ENVIRONMENT.lower() == "production":
+                    logger.error("Remote provider '%s' failed in production: %s. Silent fallback is prohibited.", provider, e)
+                    raise ValueError(
+                        f"Remote LLM provider '{provider}' request failed: {e}. "
+                        "Fallback to deterministic local demo provider is disabled in production."
+                    )
+                logger.warning("Remote provider '%s' failed or unconfigured (%s). Falling back to local demo provider.", provider, e)
                 status = "fallback"
-                actual_provider = "local"
+                fallback_reason = str(e)
+                actual_provider = "local_demo_provider"
                 response_text, input_tokens, output_tokens, usage_source = await cls._local_provider.generate(
                     model=f"local-{model}",
                     prompt=prompt,
@@ -159,7 +194,7 @@ class LLMGatewayService:
                     temperature=temperature,
                 )
         else:
-            actual_provider = "local"
+            actual_provider = "local_demo_provider"
             response_text, input_tokens, output_tokens, usage_source = await cls._local_provider.generate(
                 model=model,
                 prompt=prompt,
@@ -168,10 +203,7 @@ class LLMGatewayService:
             )
 
         latency_ms = round((time.time() - start_time) * 1000, 2)
-        cost = (
-            (input_tokens / 1000.0) * rates["input_per_1k"]
-            + (output_tokens / 1000.0) * rates["output_per_1k"]
-        )
+        cost = calculate_token_cost(provider, model, input_tokens, output_tokens)
         cost_mode = "provider_reported" if (status == "success" and actual_provider == "openai_compatible" and usage_source == "provider") else "estimated_local"
 
         # Log into Database
@@ -185,6 +217,8 @@ class LLMGatewayService:
             output_tokens=output_tokens,
             latency_ms=latency_ms,
             estimated_cost=round(cost, 6),
+            cost_mode=cost_mode,
+            usage_source=usage_source,
             status=status,
         )
         db.add(log_entry)
@@ -218,6 +252,7 @@ class LLMGatewayService:
             "usage_source": usage_source,
             "cost_mode": cost_mode,
             "pricing_source": "centralized_catalog",
+            "fallback_reason": fallback_reason,
         }
 
 

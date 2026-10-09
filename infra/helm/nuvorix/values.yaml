@@ -31,6 +31,8 @@ api:
       memory: 512Mi
   env:
     LOG_LEVEL: info
+    AUTH_MODE: "development"
+    AUTH_ENABLED: "true"
     PROMETHEUS_ENABLED: "true"
     MLFLOW_TRACKING_URI: ""
     OTEL_ENDPOINT: ""

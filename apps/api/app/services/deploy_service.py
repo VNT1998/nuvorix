@@ -55,38 +55,56 @@ class DeploymentPlatformService:
         environment: str = "staging",
         strategy: str = "blue_green",
         bypass_gate: bool = False,
-        user_id: str = "dev-demo-user",
+        bypass_reason: str | None = None,
+        user_id: str | None = None,
         org_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> Deployment:
-        # 1. Idempotency check
+        if not org_id:
+            raise ValueError("Mandatory tenant context missing: org_id is required.")
+        if not user_id:
+            raise ValueError("Mandatory user context missing: user_id is required.")
+
+        endpoint_name = "POST /deployments"
+
+        # 1. Idempotency check scoped by (organization_id, endpoint, key)
         if idempotency_key:
             res_idem = await db.execute(
                 select(IdempotencyKey).where(
                     IdempotencyKey.key == idempotency_key,
+                    IdempotencyKey.organization_id == org_id,
+                    IdempotencyKey.endpoint == endpoint_name,
                 )
             )
             cached = res_idem.scalar_one_or_none()
             if cached and "deployment_id" in cached.response_json:
                 res_existing = await db.execute(
-                    select(Deployment).where(Deployment.id == cached.response_json["deployment_id"])
+                    select(Deployment)
+                    .join(Workload, Deployment.workload_id == Workload.id)
+                    .join(Project, Workload.project_id == Project.id)
+                    .where(
+                        Deployment.id == cached.response_json["deployment_id"],
+                        Project.organization_id == org_id,
+                    )
                 )
                 existing = res_existing.scalar_one_or_none()
                 if existing:
                     return existing
 
         # 2. Verify workload exists and belongs to caller's organization
-        query_w = select(Workload).join(Project, Workload.project_id == Project.id).where(Workload.id == workload_id)
-        if org_id:
-            query_w = query_w.where(Project.organization_id == org_id)
+        query_w = (
+            select(Workload)
+            .join(Project, Workload.project_id == Project.id)
+            .where(Workload.id == workload_id, Project.organization_id == org_id)
+        )
         res_w = await db.execute(query_w)
         workload = res_w.scalar_one_or_none()
         if not workload:
-            raise ValueError(f"Workload with id '{workload_id}' not found or unauthorized.")
+            raise ValueError(f"Workload with id '{workload_id}' not found or unauthorized for organization '{org_id}'.")
 
         res_p = await db.execute(select(Project).where(Project.id == workload.project_id))
         proj = res_p.scalar_one_or_none()
-        audit_org = proj.organization_id if proj else (org_id or "org-demo-nuvorix")
+        audit_org = proj.organization_id if proj else org_id
 
         # 3. Check quality release gate: look for latest evaluation run
         res_e = await db.execute(
@@ -96,12 +114,36 @@ class DeploymentPlatformService:
         )
         latest_eval = res_e.scalars().first()
 
-        if not bypass_gate and latest_eval and latest_eval.decision == "BLOCK":
-            DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
-            raise ValueError(
-                f"Release Policy Gate BLOCKED version '{version}': "
-                f"{'; '.join(latest_eval.reasons_json)}"
-            )
+        if environment == "production":
+            if bypass_gate:
+                if not bypass_reason or not bypass_reason.strip():
+                    raise ValueError("Break-glass production deployment requires an explicit non-empty bypass_reason.")
+            else:
+                if not latest_eval:
+                    DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
+                    raise ValueError(
+                        f"Production deployment requires a completed evaluation with decision 'ALLOW' for version '{version}', "
+                        "but no evaluation exists."
+                    )
+                if latest_eval.status != "completed":
+                    DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
+                    raise ValueError(
+                        f"Production deployment requires a completed evaluation for version '{version}', "
+                        f"but evaluation status is '{latest_eval.status}'."
+                    )
+                if latest_eval.decision != "ALLOW":
+                    DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
+                    raise ValueError(
+                        f"Production deployment gate BLOCKED version '{version}': "
+                        f"decision is '{latest_eval.decision}' ({'; '.join(latest_eval.reasons_json or [])})."
+                    )
+        else:
+            if not bypass_gate and latest_eval and latest_eval.decision == "BLOCK":
+                DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
+                raise ValueError(
+                    f"Release Policy Gate BLOCKED version '{version}': "
+                    f"{'; '.join(latest_eval.reasons_json or [])}"
+                )
 
         # 4. Transition previous active deployments in this environment to retired
         res_prev = await db.execute(
@@ -136,25 +178,31 @@ class DeploymentPlatformService:
 
         DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="active").inc()
 
+        action_name = "deployments:break_glass_create" if bypass_gate else "deployments:create"
+        meta_json = {"version": version, "environment": environment, "strategy": strategy}
+        if bypass_gate:
+            meta_json["bypass_gate"] = True
+            meta_json["bypass_reason"] = bypass_reason
+
         audit = AuditEvent(
             organization_id=audit_org,
             user_id=user_id,
-            action="deployments:create",
+            action=action_name,
             resource_type="deployment",
             resource_id=dep.id,
+            reason=bypass_reason if bypass_gate else None,
             before_state_json={"workload_active_version": workload.active_version},
             after_state_json={"status": "active", "traffic_percentage": 100, "version": version},
-            metadata_json={"version": version, "environment": environment, "strategy": strategy},
+            metadata_json=meta_json,
         )
         db.add(audit)
 
         # Record idempotency key if requested
         if idempotency_key:
-            target_org = org_id or audit_org
             idem_record = IdempotencyKey(
                 key=idempotency_key,
-                organization_id=target_org,
-                endpoint="POST /deployments",
+                organization_id=audit_org,
+                endpoint=endpoint_name,
                 response_code=201,
                 response_json={"deployment_id": dep.id, "version": dep.version, "status": dep.status},
             )
@@ -170,12 +218,20 @@ class DeploymentPlatformService:
                 res_idem = await db.execute(
                     select(IdempotencyKey).where(
                         IdempotencyKey.key == idempotency_key,
+                        IdempotencyKey.organization_id == org_id,
+                        IdempotencyKey.endpoint == endpoint_name,
                     )
                 )
                 cached = res_idem.scalar_one_or_none()
                 if cached and "deployment_id" in cached.response_json:
                     res_existing = await db.execute(
-                        select(Deployment).where(Deployment.id == cached.response_json["deployment_id"])
+                        select(Deployment)
+                        .join(Workload, Deployment.workload_id == Workload.id)
+                        .join(Project, Workload.project_id == Project.id)
+                        .where(
+                            Deployment.id == cached.response_json["deployment_id"],
+                            Project.organization_id == org_id,
+                        )
                     )
                     existing = res_existing.scalar_one_or_none()
                     if existing:
@@ -187,15 +243,24 @@ class DeploymentPlatformService:
         cls,
         db: AsyncSession,
         deployment_id: str,
-        user_id: str = "dev-demo-user",
+        user_id: str | None = None,
         org_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        # 1. Idempotency check
+        if not org_id:
+            raise ValueError("Mandatory tenant context missing: org_id is required.")
+        if not user_id:
+            raise ValueError("Mandatory user context missing: user_id is required.")
+
+        endpoint_name = f"POST /deployments/{deployment_id}/rollback"
+
+        # 1. Idempotency check scoped by (organization_id, endpoint, key)
         if idempotency_key:
             res_idem = await db.execute(
                 select(IdempotencyKey).where(
                     IdempotencyKey.key == idempotency_key,
+                    IdempotencyKey.organization_id == org_id,
+                    IdempotencyKey.endpoint == endpoint_name,
                 )
             )
             cached = res_idem.scalar_one_or_none()
@@ -203,17 +268,16 @@ class DeploymentPlatformService:
                 return cached.response_json
 
         # 2. Fetch deployment to rollback with tenant check
-        query = select(Deployment).where(Deployment.id == deployment_id)
-        if org_id:
-            query = (
-                query.join(Workload, Deployment.workload_id == Workload.id)
-                .join(Project, Workload.project_id == Project.id)
-                .where(Project.organization_id == org_id)
-            )
+        query = (
+            select(Deployment)
+            .join(Workload, Deployment.workload_id == Workload.id)
+            .join(Project, Workload.project_id == Project.id)
+            .where(Deployment.id == deployment_id, Project.organization_id == org_id)
+        )
         res = await db.execute(query)
         target_dep = res.scalar_one_or_none()
         if not target_dep:
-            raise ValueError(f"Deployment with id '{deployment_id}' not found or unauthorized.")
+            raise ValueError(f"Deployment with id '{deployment_id}' not found or unauthorized for organization '{org_id}'.")
 
         # Find project organization
         res_p = await db.execute(
@@ -222,7 +286,7 @@ class DeploymentPlatformService:
             .where(Workload.id == target_dep.workload_id)
         )
         proj = res_p.scalar_one_or_none()
-        audit_org = proj.organization_id if proj else (org_id or "org-demo-nuvorix")
+        audit_org = proj.organization_id if proj else org_id
 
         # 3. Validate state transition for target deployment
         cls.validate_transition(target_dep.status, "rolled_back")
@@ -303,11 +367,10 @@ class DeploymentPlatformService:
         }
 
         if idempotency_key:
-            target_org = org_id or audit_org
             idem_record = IdempotencyKey(
                 key=idempotency_key,
-                organization_id=target_org,
-                endpoint=f"POST /deployments/{deployment_id}/rollback",
+                organization_id=audit_org,
+                endpoint=endpoint_name,
                 response_code=200,
                 response_json=response_payload,
             )
@@ -322,6 +385,8 @@ class DeploymentPlatformService:
                 res_idem = await db.execute(
                     select(IdempotencyKey).where(
                         IdempotencyKey.key == idempotency_key,
+                        IdempotencyKey.organization_id == org_id,
+                        IdempotencyKey.endpoint == endpoint_name,
                     )
                 )
                 cached = res_idem.scalar_one_or_none()

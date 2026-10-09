@@ -92,21 +92,28 @@ class RAGPlatformService:
         title: str,
         content: str,
         source_uri: str = "manual_upload",
-        user_id: str = "usr-demo-admin",
+        user_id: str | None = None,
         org_id: str | None = None,
     ) -> KnowledgeDocument:
+        if not org_id:
+            raise ValueError("Mandatory tenant context missing: org_id is required for document ingestion.")
+        if not user_id:
+            raise ValueError("Mandatory user context missing: user_id is required for document ingestion.")
+
         # 1. Verify knowledge base exists and belongs to the caller's organization
-        query = select(KnowledgeBase).join(Project, KnowledgeBase.project_id == Project.id).where(KnowledgeBase.id == knowledge_base_id)
-        if org_id:
-            query = query.where(Project.organization_id == org_id)
+        query = (
+            select(KnowledgeBase)
+            .join(Project, KnowledgeBase.project_id == Project.id)
+            .where(KnowledgeBase.id == knowledge_base_id, Project.organization_id == org_id)
+        )
         res_kb = await db.execute(query)
         kb = res_kb.scalar_one_or_none()
         if not kb:
-            raise ValueError(f"Knowledge base with id '{knowledge_base_id}' not found or unauthorized.")
+            raise ValueError(f"Knowledge base with id '{knowledge_base_id}' not found or unauthorized for organization '{org_id}'.")
 
         res_p = await db.execute(select(Project).where(Project.id == kb.project_id))
         proj = res_p.scalar_one_or_none()
-        audit_org = proj.organization_id if proj else (org_id or "org-demo-nuvorix")
+        audit_org = proj.organization_id if proj else org_id
 
         # 2. Create document record
         doc = KnowledgeDocument(
@@ -177,14 +184,16 @@ class RAGPlatformService:
         - Filters by min_score and respects tenant boundaries.
         """
         # Tenant ownership validation
-        if org_id:
-            res_kb = await db.execute(
-                select(KnowledgeBase)
-                .join(Project, KnowledgeBase.project_id == Project.id)
-                .where(KnowledgeBase.id == knowledge_base_id, Project.organization_id == org_id)
-            )
-            if not res_kb.scalar_one_or_none():
-                raise ValueError(f"Knowledge base '{knowledge_base_id}' not found or unauthorized.")
+        if not org_id:
+            raise ValueError("Mandatory tenant context missing: org_id is required for knowledge queries.")
+
+        res_kb = await db.execute(
+            select(KnowledgeBase)
+            .join(Project, KnowledgeBase.project_id == Project.id)
+            .where(KnowledgeBase.id == knowledge_base_id, Project.organization_id == org_id)
+        )
+        if not res_kb.scalar_one_or_none():
+            raise ValueError(f"Knowledge base '{knowledge_base_id}' not found or unauthorized for organization '{org_id}'.")
 
         with trace_span("rag.vector_retrieval", {"knowledge_base_id": knowledge_base_id, "query_terms": len(query.split()), "top_k": top_k}):
             start_time = time.time()

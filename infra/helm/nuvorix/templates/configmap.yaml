@@ -20,6 +20,8 @@ metadata:
 data:
   PROJECT_NAME: "Nuvorix Enterprise Platform"
   ENVIRONMENT: {{ .Values.global.environment | quote }}
+  AUTH_MODE: {{ .Values.api.env.AUTH_MODE | default "production" | quote }}
+  AUTH_ENABLED: {{ .Values.api.env.AUTH_ENABLED | default "true" | quote }}
   MLFLOW_TRACKING_URI: {{ .Values.api.env.MLFLOW_TRACKING_URI | quote }}
   OTEL_ENDPOINT: {{ .Values.api.env.OTEL_ENDPOINT | quote }}
   PROMETHEUS_ENABLED: {{ .Values.api.env.PROMETHEUS_ENABLED | quote }}

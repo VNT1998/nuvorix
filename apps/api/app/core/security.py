@@ -34,7 +34,7 @@ class UserSession(BaseModel):
 
     def to_context(self, request_id: str | None = None, source: str = "api") -> ExecutionContext:
         perms = ROLE_PERMISSIONS.get(self.role, set())
-        if self.scopes:
+        if self.scopes is not None:
             perms = perms.intersection(set(self.scopes))
         return ExecutionContext(
             user_id=self.user_id,
@@ -52,7 +52,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "workloads:create", "workloads:delete", "workloads:read",
         "models:train", "models:register", "models:promote",
         "evaluations:run", "evaluations:approve",
-        "deployments:create", "deployments:rollback",
+        "deployments:create", "deployments:rollback", "deployments:bypass_gate",
         "knowledge:ingest", "knowledge:query",
         "agents:run", "agents:tools:execute_high_risk",
         "incidents:resolve", "incidents:remediate",
@@ -93,6 +93,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
 }
 
+ALL_PERMISSIONS: set[str] = {perm for perms in ROLE_PERMISSIONS.values() for perm in perms}
+
 
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
@@ -122,7 +124,7 @@ def create_access_token(
         "role": role,
         "name": name or f"User {user_id}",
         "email": email or f"{user_id}@nuvorix.local",
-        "scopes": scopes if scopes else None,
+        "scopes": scopes if scopes is not None else None,
         "exp": int(time.time()) + expires_in_seconds,
         "iat": int(time.time()),
     }
@@ -171,6 +173,8 @@ async def get_current_user(
     - In 'production' mode: rejects requests lacking valid credentials with 401; ignores dev headers.
     - In 'development' mode: falls back to dev headers or explicit demo user identity.
     """
+    is_prod = (settings.ENVIRONMENT.lower() == "production") or (settings.AUTH_MODE == "production")
+
     # 1. Bearer Token Authentication
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split("Bearer ", 1)[1].strip()
@@ -189,7 +193,7 @@ async def get_current_user(
                 actor_type="user",
                 request_id=x_request_id,
             )
-        elif settings.AUTH_MODE == "production":
+        elif is_prod:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired access token",
@@ -216,7 +220,7 @@ async def get_current_user(
                 actor_type="api_key",
                 request_id=x_request_id,
             )
-        elif settings.AUTH_MODE == "production":
+        elif is_prod:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or revoked API key",
@@ -224,7 +228,7 @@ async def get_current_user(
             )
 
     # 3. Production Enforcement: Dev headers are NEVER accepted in production mode
-    if settings.AUTH_MODE == "production":
+    if is_prod:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication credentials required in production mode",
@@ -254,7 +258,7 @@ def check_permission(user: UserSession | ExecutionContext, required_permission: 
         return required_permission in user.permissions
 
     role_perms = ROLE_PERMISSIONS.get(user.role, set())
-    if user.scopes:
+    if user.scopes is not None:
         effective_perms = role_perms.intersection(set(user.scopes))
         return required_permission in effective_perms
     return required_permission in role_perms

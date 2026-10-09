@@ -251,6 +251,8 @@ class DeploymentCreate(BaseModel):
     version: str
     environment: str = "staging"
     strategy: str = "blue_green"
+    bypass_gate: bool = False
+    bypass_reason: str | None = None
 
 
 class DeploymentResponse(BaseModel):

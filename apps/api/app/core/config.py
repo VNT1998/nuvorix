@@ -56,16 +56,52 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":
-        if self.AUTH_MODE == "production" and (
-            not self.SECRET_KEY
-            or self.SECRET_KEY == "nuvorix-insecure-dev-secret-key-change-in-production"
-            or "insecure" in self.SECRET_KEY.lower()
-            or len(self.SECRET_KEY) < 32
-        ):
-            raise ValueError(
-                "Production configuration error: AUTH_MODE='production' requires an externally configured, "
-                "cryptographically secure SECRET_KEY with at least 32 characters."
-            )
+        is_prod = self.ENVIRONMENT.lower() == "production"
+
+        if is_prod:
+            if self.AUTH_MODE != "production":
+                raise ValueError(
+                    "Production configuration error: ENVIRONMENT='production' requires AUTH_MODE='production'."
+                )
+            if not self.AUTH_ENABLED:
+                raise ValueError(
+                    "Production configuration error: ENVIRONMENT='production' requires AUTH_ENABLED=True."
+                )
+            if (
+                not self.SECRET_KEY
+                or self.SECRET_KEY == "nuvorix-insecure-dev-secret-key-change-in-production"
+                or "insecure" in self.SECRET_KEY.lower()
+                or len(self.SECRET_KEY) < 32
+            ):
+                raise ValueError(
+                    "Production configuration error: ENVIRONMENT='production' requires an externally configured, "
+                    "cryptographically secure SECRET_KEY with at least 32 characters."
+                )
+            if self.DATABASE_URL.startswith("sqlite"):
+                raise ValueError(
+                    "Production configuration error: ENVIRONMENT='production' requires PostgreSQL database (DATABASE_URL), SQLite is forbidden."
+                )
+            if not self.MLFLOW_TRACKING_URI or self.MLFLOW_TRACKING_URI.startswith("sqlite") or "localhost" in self.MLFLOW_TRACKING_URI:
+                raise ValueError(
+                    "Production configuration error: ENVIRONMENT='production' requires an external MLflow tracking URI (not local SQLite or localhost)."
+                )
+            if not self.CORS_ORIGINS or any("localhost" in origin or "127.0.0.1" in origin for origin in self.CORS_ORIGINS):
+                raise ValueError(
+                    "Production configuration error: ENVIRONMENT='production' requires explicit non-localhost CORS_ORIGINS."
+                )
+
+        elif self.AUTH_MODE == "production":
+            if (
+                not self.SECRET_KEY
+                or self.SECRET_KEY == "nuvorix-insecure-dev-secret-key-change-in-production"
+                or "insecure" in self.SECRET_KEY.lower()
+                or len(self.SECRET_KEY) < 32
+            ):
+                raise ValueError(
+                    "Configuration error: AUTH_MODE='production' requires an externally configured, "
+                    "cryptographically secure SECRET_KEY with at least 32 characters."
+                )
+
         return self
 
 

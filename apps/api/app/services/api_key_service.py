@@ -37,13 +37,20 @@ class APIKeyService:
             else None
         )
 
+        if scopes is not None:
+            from apps.api.app.core.security import ALL_PERMISSIONS
+
+            for s in scopes:
+                if s not in ALL_PERMISSIONS:
+                    raise ValueError(f"Invalid scope '{s}'. Must be one of registered permissions.")
+
         api_key = APIKey(
             organization_id=organization_id,
             name=name,
             key_prefix=key_prefix,
             key_hash=key_hash,
             role=role,
-            scopes_json=scopes or [],
+            scopes_json=scopes,
             expires_at=expires_at,
         )
         db.add(api_key)
@@ -103,7 +110,7 @@ class APIKeyService:
             "organization_id": api_key.organization_id,
             "name": api_key.name,
             "role": api_key.role,
-            "scopes": api_key.scopes_json or [],
+            "scopes": api_key.scopes_json,
         }
         return api_key, claims
 

@@ -12,6 +12,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -71,9 +72,12 @@ class APIKey(Base):
 
 class IdempotencyKey(Base):
     __tablename__ = "idempotency_keys"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "endpoint", "key", name="uq_idempotency_org_endpoint_key"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
-    key: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    key: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
     organization_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     endpoint: Mapped[str] = mapped_column(String(255), nullable=False)
     response_code: Mapped[int] = mapped_column(Integer, nullable=False)

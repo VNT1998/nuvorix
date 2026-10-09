@@ -68,14 +68,9 @@ class AgentRuntimeService:
         Public tool execution endpoint used by both LangGraph and external MCP callers.
         Enforces tenant boundaries, role authorization, and stateful side-effects.
         """
-        # If no explicit context is passed (e.g. testing or minimal caller), enforce a safe default context
-        ctx = context or ExecutionContext(
-            user_id="anonymous",
-            organization_id="org-demo-nuvorix",
-            role="viewer",
-            permissions={"workloads:read", "knowledge:query"},
-            source="api",
-        )
+        if not context:
+            raise ValueError("Mandatory context missing: ExecutionContext is required for tool execution.")
+        ctx = context
 
         try:
             authorize_tool(
@@ -160,26 +155,26 @@ class AgentRuntimeService:
                 output = diagnostics
 
             elif tool_name == "emergency_circuit_breaker":
-                # Stateful logical circuit breaker execution
+                # Stateful logical circuit breaker execution - requires explicit target
                 target_dep_id = tool_input.get("deployment_id")
                 reason = tool_input.get("reason", "Operator emergency circuit trip")
 
-                # If no deployment ID was provided, locate the latest active deployment for this tenant
+                if not target_dep_id:
+                    return {
+                        "error": "Missing required parameter 'deployment_id'. "
+                        "Logical circuit breaker requires an explicit deployment target ID (no fallback allowed)."
+                    }
+
                 query_dep = (
                     select(Deployment)
                     .join(Workload, Deployment.workload_id == Workload.id)
                     .join(Project, Workload.project_id == Project.id)
-                    .where(Project.organization_id == ctx.organization_id)
+                    .where(Deployment.id == target_dep_id, Project.organization_id == ctx.organization_id)
                 )
-                if target_dep_id:
-                    query_dep = query_dep.where(Deployment.id == target_dep_id)
-                else:
-                    query_dep = query_dep.where(Deployment.status == "active").order_by(Deployment.created_at.desc())
-
                 res_dep = await db.execute(query_dep)
-                deployment = res_dep.scalars().first()
+                deployment = res_dep.scalar_one_or_none()
                 if not deployment:
-                    return {"error": "Target deployment not found or unauthorized for this organization."}
+                    return {"error": f"Target deployment '{target_dep_id}' not found or unauthorized for this organization."}
 
                 # Idempotency check: if circuit is already open, do not duplicate side-effects
                 if deployment.status == "circuit_open":
@@ -258,7 +253,7 @@ class AgentRuntimeService:
         elif any(w in prompt_lower for w in ["diagnostic", "latency", "memory", "db", "check"]):
             return "diagnostic_check", {}
         elif any(w in prompt_lower for w in ["halt", "stop", "circuit", "kill", "block", "emergency"]):
-            return "emergency_circuit_breaker", {"reason": "Operator emergency invoke", "confirmed": True}
+            return "emergency_circuit_breaker", {"reason": "Operator emergency invoke", "confirmed": False}
         return None, {}
 
     @classmethod
@@ -276,13 +271,9 @@ class AgentRuntimeService:
         START -> Planner -> (Conditional Router) -> Tool Executor -> Synthesizer -> END
         """
         start_overall = time.time()
-        ctx = context or ExecutionContext(
-            user_id="dev-demo-user",
-            organization_id="org-demo-nuvorix",
-            role="developer",
-            permissions={"workloads:read", "knowledge:query", "agents:run"},
-            source="agent",
-        )
+        if not context:
+            raise ValueError("Mandatory context missing: ExecutionContext is required for agent workflow execution.")
+        ctx = context
 
         async def planner_node(state: AgentState) -> dict[str, Any]:
             t0 = time.time()
@@ -444,15 +435,18 @@ class AgentRuntimeService:
         steps = output_state.get("steps", [])
         tools_used = output_state.get("tools_used", [])
 
-        total_tokens = len(prompt.split()) * 3 + len(final_text.split()) * 2 + 150
-        estimated_cost = round((total_tokens / 1000.0) * 0.002, 6)
+        in_tokens = len(prompt.split()) * 3
+        out_tokens = len(final_text.split()) * 2
+        total_tokens = in_tokens + out_tokens + 150
+        from apps.api.app.services.gateway_service import calculate_token_cost
+        estimated_cost = calculate_token_cost("local", "nuvorix-state-machine", in_tokens, out_tokens)
 
         record_llm_usage(
             provider="langgraph-orchestrator",
             model="nuvorix-state-machine",
             status="success",
-            input_tokens=len(prompt.split()) * 3,
-            output_tokens=len(final_text.split()) * 2,
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
             latency_sec=total_latency_ms / 1000.0,
             cost=estimated_cost,
         )

@@ -20,26 +20,29 @@ Each capability in Nuvorix is classified into one of six standardized lifecycle 
 
 | Capability | Current State | Verification / Evidence | Status |
 |---|---|---|:---:|
-| **Control Plane API** | FastAPI + Async SQLAlchemy 2.0 + Pydantic v2 | 38 passing pytest tests across 9 test suites | Verified Real |
-| **Authentication & RBAC** | Production token verification + DB API keys (`nvx_*`) + dev headers | Strict 401 unauthenticated in prod, constant-time hash check, RBAC permissions & scopes | Production-Ready |
-| **Tool Authorization & Tenant Isolation** | ExecutionContext + caller validation + high-risk confirmation | Multi-tenant filtering across tools, knowledge search, workloads, and audit trails | Verified Real |
+| **Control Plane API** | FastAPI + Async SQLAlchemy 2.0 + Pydantic v2 | 45 passing pytest tests across 10 test suites | Verified Real |
+| **Authentication & RBAC** | Production token verification + DB API keys (`nvx_*`) + fail-fast config | Strict 401 in prod, dev headers rejected, fail-fast production config validation | Production-Ready |
+| **Tool Authorization & Tenant Isolation** | ExecutionContext + mandatory tenant context at service boundary | Multi-tenant isolation across tools, knowledge search, workloads, and audit trails | Verified Real |
+| **Production Release Gate** | Mandatory completed `ALLOW` evaluation for production deployment | Production releases blocked without passing eval; break-glass requires role + reason + audit | Verified Real |
+| **Scoped Idempotency** | Idempotency keys strictly scoped by `(organization_id, endpoint, key)` | Cross-tenant regression verified: identical key across two orgs cannot cross-contaminate | Verified Real |
+| **Logical Circuit Breaker** | Explicit deployment target required (no fallback) + explicit confirmation | Prompt router never manufactures confirmation; wrong tenant and missing target rejected | Verified Real |
 | **MLflow Experiment Tracking** | Real `mlflow` runs, metrics, parameters, model artifact logging | Local runs logged in `sqlite:///mlflow.db` | Verified Local |
 | **MLflow Model Registry** | Official MLflow registry entities & stages integration | `create_registered_model`, `create_model_version`, tags/aliases | Verified Local |
 | **LangGraph Agent State Machine** | Real `langgraph.graph.StateGraph` state machine | Nodes and conditional edges functional with tool execution | Verified Real |
 | **RAG Embeddings** | Real dense embedding model (`fastembed` BAAI/bge-small-en-v1.5) | 384-dimensional dense vectors generated via ONNX Runtime | Verified Real |
 | **Vector Retrieval & Ranking** | Native PostgreSQL `pgvector` index + mathematically aligned cosine similarity fallback | Normalized cosine similarity in $[0, 1]$, distance $= 1 - \text{sim}$, `min_score` filtering | Verified Real |
 | **Evaluation Engine** | Empirical benchmark suite execution & threshold policies | Real `Recall@3`, `MRR@3`, tool selection accuracy, and p95 latency distribution (no string heuristics) | Verified Real |
-| **LLM Gateway** | Real provider client abstraction (`OpenAICompatibleProvider`, `LocalDeterministicProvider`) | HTTP calls to OpenAI/vLLM/Ollama + local fallback with token accounting | Verified Real |
+| **LLM Gateway** | Provider abstraction with centralized pricing catalog & fail-closed production | Production fails closed without silent fallback; per-token input/output accounting | Verified Real |
 | **MCP Standard Protocol** | Model Context Protocol JSON-RPC 2.0 & REST endpoints | `initialize`, `notifications/initialized`, `tools/list`, `tools/call`, `ping` | Verified Real |
-| **Deployment State Machine** | Centralized legal transitions (`candidate`, `active`, `retired`, `rolled_back`, etc.) | State machine validation + `Idempotency-Key` deduplication on deployment mutations | Verified Real |
+| **Deployment State Machine** | Centralized legal transitions (`candidate`, `active`, `retired`, `rolled_back`, etc.) | State machine validation + scoped `Idempotency-Key` deduplication on deployment mutations | Verified Real |
 | **Incident Remediation Safety** | Linked deployment state verification, tenant checks, and rollback | Incident links deployment ID, verifies active state, records before/after audit state | Verified Real |
 | **Storage Abstraction** | Pluggable `StorageBackend` (`LocalFileSystemStorage`, `S3CompatibleStorage`) | Local file storage with non-blocking threads + S3-compatible backend | Verified Local |
 | **OpenTelemetry Telemetry** | In-memory ring buffer exporter + optional OTLP HTTP collector export | Trace inspection via `/telemetry/traces` + `X-Request-ID` correlation middleware | Verified Real |
 | **Terraform IaC** | Modules in `infra/terraform/` | Passed `terraform validate` and `terraform fmt` | Artifact Only |
 | **Helm Chart** | Chart in `infra/helm/nuvorix/` (externalized secrets, dev/prod values) | Standard Helm v3 chart with `.Values.secrets.existingSecret` | Artifact Only |
 | **Kubernetes / Kind** | Multi-service manifest in `infra/kind/nuvorix-all.yaml` | Postgres (pgvector), API, Console, ConfigMap manifests | Artifact Only |
-| **CI/CD Workflows** | GitHub Actions `.github/workflows/ci.yml` | Strict `uv sync`, `npm ci`, Ruff, Pytest, Terraform fmt/validate, Helm lint | Verified Real |
-| **Frontend Web Console** | React 19 + TypeScript + Vite + Tailwind CSS | Passed `tsc -b && vite build` in 1.36s | Verified Real |
+| **CI/CD Workflows** | GitHub Actions `.github/workflows/ci.yml` | `uv sync --frozen --extra dev`, `npm ci`, Ruff, Pytest, Terraform fmt/validate, Helm lint | Verified Real |
+| **Frontend Web Console** | React 19 + TypeScript + Vite + Tailwind CSS | Passed `tsc -b && vite build` in 1.45s with tracked `lib/api.ts` | Verified Real |
 
 ---
 

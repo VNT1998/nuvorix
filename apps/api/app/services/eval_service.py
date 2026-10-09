@@ -237,6 +237,7 @@ class EvaluationEngineService:
                         knowledge_base_id=kb.id,
                         query=case["query"],
                         top_k=3,
+                        org_id=org_id,
                     )
                     query_latencies_ms.append((time.perf_counter() - t_start) * 1000.0)
                 else:
@@ -284,6 +285,7 @@ class EvaluationEngineService:
                         knowledge_base_id=kb.id,
                         query=sample_q,
                         top_k=3,
+                        org_id=org_id,
                     )
                     query_latencies_ms.append((time.perf_counter() - t_rep) * 1000.0)
 

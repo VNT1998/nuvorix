@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.app.core.security import UserSession, require_permission
+from apps.api.app.core.security import UserSession, check_permission, require_permission
 from apps.api.app.db.session import get_db
 from apps.api.app.models.entities import Deployment, Project, Workload
 from apps.api.app.schemas.domain import DeploymentCreate, DeploymentResponse, RollbackResponse
@@ -32,6 +32,19 @@ async def create_deployment(
     user: UserSession = Depends(require_permission("deployments:create")),
 ):
     await _verify_workload_org(db, workload_id, user.organization_id)
+
+    if payload.bypass_gate:
+        if not check_permission(user, "deployments:bypass_gate"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Break-glass bypass requires 'deployments:bypass_gate' permission",
+            )
+        if not payload.bypass_reason or not payload.bypass_reason.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Explicit non-empty bypass_reason is required for break-glass deployment",
+            )
+
     try:
         dep = await DeploymentPlatformService.create_deployment(
             db=db,
@@ -39,6 +52,8 @@ async def create_deployment(
             version=payload.version,
             environment=payload.environment,
             strategy=payload.strategy,
+            bypass_gate=payload.bypass_gate,
+            bypass_reason=payload.bypass_reason,
             user_id=user.user_id,
             org_id=user.organization_id,
             idempotency_key=idempotency_key,

@@ -113,6 +113,7 @@ async def ingest_document(
             content=payload.content,
             source_uri=payload.source_uri or "manual_upload",
             user_id=user.user_id,
+            org_id=user.organization_id,
         )
         return doc
     except ValueError as e:
@@ -146,6 +147,7 @@ async def query_knowledge_base(
         query=payload.query,
         top_k=payload.top_k,
         min_score=payload.min_score,
+        org_id=user.organization_id,
     )
     return QueryResponse(
         query=payload.query,

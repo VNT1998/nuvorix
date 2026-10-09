@@ -21,6 +21,8 @@ api:
       memory: 1Gi
   env:
     LOG_LEVEL: info
+    AUTH_MODE: "production"
+    AUTH_ENABLED: "true"
     PROMETHEUS_ENABLED: "true"
     MLFLOW_TRACKING_URI: "http://mlflow.mlops.svc.cluster.local:5000"
     OTEL_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318"
