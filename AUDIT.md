@@ -39,29 +39,29 @@ This audit identified, planned, and systematically executed 26 high-impact harde
 ### Category 3: Backend Architecture, Error Handling & Database
 | ID | Severity | File Path | Finding & One-Line Fix | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **AUD-012** | High | `apps/api/app/core/errors.py`, `apps/api/app/main.py` | No centralized exception hierarchy or global exception handlers. Implemented RFC 7807 problem details with correlation request IDs. | **Resolved** |
-| **AUD-013** | High | `apps/api/app/core/logging.py`, `apps/api/app/main.py` | Standard python logging lacks structured JSON output with request IDs. Added structured JSON logging formatter and request ID propagation. | **Resolved** |
-| **AUD-014** | Medium | `apps/api/alembic.ini`, `apps/api/migrations/` | Missing Alembic migration harness for database schema tracking. Initialized Alembic with baseline migration for `Base.metadata`. | **Resolved** |
+| **AUD-012** | High | `backend/app/core/errors.py`, `backend/app/main.py` | No centralized exception hierarchy or global exception handlers. Implemented RFC 7807 problem details with correlation request IDs. | **Resolved** |
+| **AUD-013** | High | `backend/app/core/logging.py`, `backend/app/main.py` | Standard python logging lacks structured JSON output with request IDs. Added structured JSON logging formatter and request ID propagation. | **Resolved** |
+| **AUD-014** | Medium | `backend/alembic.ini`, `backend/migrations/` | Missing Alembic migration harness for database schema tracking. Initialized Alembic with baseline migration for `Base.metadata`. | **Resolved** |
 
 ### Category 4: AI & LLM Engineering
 | ID | Severity | File Path | Finding & One-Line Fix | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **AUD-015** | High | `apps/api/app/api/v1/gateway.py`, `apps/api/app/services/gateway_service.py` | Missing Server-Sent Events (SSE) streaming endpoint for LLM generation. Implemented `/gateway/chat/stream` SSE generator with token-by-token emission. | **Resolved** |
-| **AUD-016** | Medium | `apps/api/app/ai/prompts.py` | System prompts and eval templates scattered in services. Extracted into versioned prompts registry (`PromptsCatalog`). | **Resolved** |
+| **AUD-015** | High | `backend/app/api/v1/gateway.py`, `backend/app/services/gateway_service.py` | Missing Server-Sent Events (SSE) streaming endpoint for LLM generation. Implemented `/gateway/chat/stream` SSE generator with token-by-token emission. | **Resolved** |
+| **AUD-016** | Medium | `backend/app/ai/prompts.py` | System prompts and eval templates scattered in services. Extracted into versioned prompts registry (`PromptsCatalog`). | **Resolved** |
 
 ### Category 5: Frontend Tooling, Configuration & Quality (React + Vite + TypeScript)
 | ID | Severity | File Path | Finding & One-Line Fix | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **AUD-017** | High | `apps/web/tsconfig.app.json`, `apps/web/vite.config.ts` | TypeScript not in strict mode; path alias `@/*` not configured. Enabled `"strict": true` and configured `@/*` alias in both configs. | **Resolved** |
-| **AUD-018** | High | `apps/web/eslint.config.js`, `apps/web/.prettierrc` | Missing ESLint flat configuration and Prettier formatting configuration. Added ESLint config and Prettier setup (0 errors, 0 warnings). | **Resolved** |
-| **AUD-019** | High | `apps/web/package.json`, `apps/web/vitest.config.ts`, `apps/web/src/tests/` | Missing automated frontend test framework. Added Vitest, React Testing Library, and component tests. | **Resolved** |
-| **AUD-020** | Medium | `apps/web/src/lib/env.ts` | Frontend environment variables lack runtime type validation. Implemented typed `env.ts` validation schema. | **Resolved** |
+| **AUD-017** | High | `frontend/tsconfig.app.json`, `frontend/vite.config.ts` | TypeScript not in strict mode; path alias `@/*` not configured. Enabled `"strict": true` and configured `@/*` alias in both configs. | **Resolved** |
+| **AUD-018** | High | `frontend/eslint.config.js`, `frontend/.prettierrc` | Missing ESLint flat configuration and Prettier formatting configuration. Added ESLint config and Prettier setup (0 errors, 0 warnings). | **Resolved** |
+| **AUD-019** | High | `frontend/package.json`, `frontend/vitest.config.ts`, `frontend/src/tests/` | Missing automated frontend test framework. Added Vitest, React Testing Library, and component tests. | **Resolved** |
+| **AUD-020** | Medium | `frontend/src/lib/env.ts` | Frontend environment variables lack runtime type validation. Implemented typed `env.ts` validation schema. | **Resolved** |
 
 ### Category 6: Frontend UX, Architecture & State Management
 | ID | Severity | File Path | Finding & One-Line Fix | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **AUD-021** | High | `apps/web/src/components/ErrorBoundary.tsx`, `apps/web/src/App.tsx` | Missing top-level React Error Boundary. Wrapped views in an accessible Error Boundary with crash recovery button. | **Resolved** |
-| **AUD-022** | Medium | `apps/web/src/pages/LLMGatewayView.tsx`, `apps/web/src/lib/api.ts` | LLM Gateway UI lacks streaming support, copy to clipboard, abort control. Implemented streaming response UX, stop generation, and copy helper. | **Resolved** |
+| **AUD-021** | High | `frontend/src/components/ErrorBoundary.tsx`, `frontend/src/App.tsx` | Missing top-level React Error Boundary. Wrapped views in an accessible Error Boundary with crash recovery button. | **Resolved** |
+| **AUD-022** | Medium | `frontend/src/pages/LLMGatewayView.tsx`, `frontend/src/lib/api.ts` | LLM Gateway UI lacks streaming support, copy to clipboard, abort control. Implemented streaming response UX, stop generation, and copy helper. | **Resolved** |
 
 ### Category 7: DevOps, CI/CD, Containerization & Automation
 | ID | Severity | File Path | Finding & One-Line Fix | Status |
@@ -82,21 +82,21 @@ This audit identified, planned, and systematically executed 26 high-impact harde
 The comprehensive quality gate (`make check`) was executed cleanly across the monorepo:
 
 ### 1. Backend Linting & Formatting
-- **Ruff Lint**: `uv run ruff check apps packages` -> Passed (0 errors, strict rules `E, F, I, B, UP, SIM, S, C4, PT, RUF`).
-- **Ruff Format**: `uv run ruff format --check apps packages` -> All files formatted according to PEP 8 standards.
+- **Ruff Lint**: `uv run ruff check backend packages` -> Passed (0 errors, strict rules `E, F, I, B, UP, SIM, S, C4, PT, RUF`).
+- **Ruff Format**: `uv run ruff format --check backend packages` -> All files formatted according to PEP 8 standards.
 
 ### 2. Static Typing Verification
-- **Backend Mypy**: `uv run mypy apps/api/app packages/cli packages/sdk-python` -> **Success: no issues found in 44 source files**.
+- **Backend Mypy**: `uv run mypy backend/app packages/cli packages/sdk-python` -> **Success: no issues found in 44 source files**.
 - **Frontend TypeScript**: `npm run typecheck` (`tsc -b`) -> **Success: 0 type errors** in strict mode.
 
 ### 3. Automated Test Suites & Coverage
 - **Backend Pytest**: `uv run pytest -v` -> **45 passed, 0 failures** across 7 test suites.
-- **Coverage**: 69% aggregate coverage on backend (`apps.api.app`), 100% on core entities and schemas.
+- **Coverage**: 69% aggregate coverage on backend (`backend.app`), 100% on core entities and schemas.
 - **Frontend Vitest**: `npm test` -> **7 passed** across API tests and ErrorBoundary rendering test.
 
 ### 4. Frontend Code Quality & Bundle Build
 - **ESLint**: `npm run lint` -> **0 errors, 0 warnings** (fixed exhaustive-deps in `App.tsx`).
-- **Vite Production Build**: `npm run build` -> **Built successfully in 1.52s** (`dist/assets/index.js` 332 kB, gzip 91 kB).
+- **Vite Production Build**: `npm run build` -> **Built successfully in 1.38s** (`dist/assets/index.js` 332 kB, gzip 91 kB).
 
 ### 5. Contract Synchronization & Migration Scaffold
 - **OpenAPI Export**: `uv run python scripts/gen_openapi_schema.py` -> 40 endpoints exported to `docs/openapi.json`.

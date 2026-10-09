@@ -38,7 +38,7 @@ def wait_for_url(url: str, timeout: int = 15):
 def main():
     print("1. Starting FastAPI control plane server...")
     api_proc = subprocess.Popen(
-        ["uv", "run", "python", "-m", "uvicorn", "apps.api.app.main:app", "--host", "127.0.0.1", "--port", "8000"],
+        ["uv", "run", "python", "-m", "uvicorn", "backend.app.main:app", "--host", "127.0.0.1", "--port", "8000"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -46,7 +46,7 @@ def main():
     print("2. Starting Vite web console server...")
     web_proc = subprocess.Popen(
         ["npx", "vite", "preview", "--host", "127.0.0.1", "--port", "5173"],
-        cwd="apps/web",
+        cwd="frontend",
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

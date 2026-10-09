@@ -16,28 +16,28 @@ help:
 
 install:
 	uv sync --extra dev
-	cd apps/web && npm install
+	cd frontend && npm install
 
 lint:
-	uv run ruff check apps packages
-	cd apps/web && npm run lint
+	uv run ruff check backend packages
+	cd frontend && npm run lint
 
 format:
-	uv run ruff format apps packages
+	uv run ruff format backend packages
 
 typecheck:
-	uv run mypy apps/api/app packages/cli packages/sdk-python
-	cd apps/web && npm run typecheck
+	uv run mypy backend/app packages/cli packages/sdk-python
+	cd frontend && npm run typecheck
 
 test:
 	uv run pytest -v
-	cd apps/web && npm test
+	cd frontend && npm test
 
 test-cov:
-	uv run pytest --cov=apps.api.app --cov-report=term-missing --cov-report=html:coverage_html -v
+	uv run pytest --cov=backend.app --cov-report=term-missing --cov-report=html:coverage_html -v
 
 build:
-	cd apps/web && npm run build
+	cd frontend && npm run build
 
 gen-api:
 	uv run python scripts/gen_openapi_schema.py
@@ -52,4 +52,4 @@ docker-down:
 	docker compose down
 
 clean:
-	rm -rf .pytest_cache .ruff_cache htmlcov coverage_html apps/web/dist apps/web/node_modules/.vite
+	rm -rf .pytest_cache .ruff_cache htmlcov coverage_html frontend/dist frontend/node_modules/.vite

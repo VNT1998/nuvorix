@@ -2,7 +2,7 @@ services:
   nuvorix-api:
     build:
       context: .
-      dockerfile: apps/api/Dockerfile
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -20,7 +20,7 @@ services:
   nuvorix-web:
     build:
       context: .
-      dockerfile: apps/web/Dockerfile
+      dockerfile: frontend/Dockerfile
     ports:
       - "5173:80"
     depends_on:

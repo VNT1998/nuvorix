@@ -166,7 +166,7 @@ uv sync --extra dev
 
 ### 2. Start Control Plane API
 ```bash
-uv run python -m uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000 --reload
+uv run python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 - API is live at: `http://localhost:8000`
 - Interactive OpenAPI Docs: `http://localhost:8000/docs`
@@ -176,7 +176,7 @@ uv run python -m uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000 --relo
 ### 3. Start Web Platform Console with `Vite`
 In a new terminal:
 ```bash
-cd apps/web
+cd frontend
 npm install --legacy-peer-deps
 npm run dev
 ```
@@ -293,14 +293,14 @@ Nuvorix features a comprehensive test suite across 9 dedicated test modules veri
 See [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) for the verified capability matrix.
 
 ```bash
-# Run full pytest test suite (38 passed across 9 test suites)
+# Run full pytest test suite (45 passed across 7 test suites)
 uv run pytest
 
 # Run Ruff linter & type checks
-uv run ruff check apps packages
+uv run ruff check backend packages
 
 # Verify TypeScript & Vite production build
-cd apps/web && npm run build && cd ../..
+cd frontend && npm run build && cd ..
 
 # Verify Terraform configuration
 terraform fmt -check -recursive infra/terraform
@@ -373,27 +373,27 @@ kubectl get pods -n nuvorix
 
 ```text
 nuvorix/
-├── apps/
-│   ├── api/
-│   │   ├── app/
-│   │   │   ├── api/v1/         # Endpoints (Projects, Workloads, ML, RAG, Agents, Deployments, Incidents)
-│   │   │   ├── core/           # Config, RBAC security, Prometheus telemetry
-│   │   │   ├── db/             # Async SQLAlchemy session & base
-│   │   │   ├── models/         # Database models (Org, Project, Workload, Model, Deployment, etc.)
-│   │   │   ├── schemas/        # Pydantic v2 schemas with ConfigDict
-│   │   │   ├── services/       # ML service, RAG vector service, LangGraph agent runtime, Eval gates
-│   │   │   ├── main.py         # FastAPI application entrypoint
-│   │   │   └── seed.py         # Deterministic seed data generator
-│   │   ├── tests/              # Pytest test suite
-│   │   └── Dockerfile          # Multi-stage production container
-│   └── web/                    # Vite + React 19 + TypeScript + Tailwind CSS Console
-│       ├── src/
-│       │   ├── components/     # Navbar, Sidebar
-│       │   ├── pages/          # Dashboard, ML Studio, RAG Hub, Agent Studio, Evaluations, Deployments, RCA
-│       │   ├── lib/api.ts      # Typed frontend API client
-│       │   └── types.ts        # Domain TypeScript interfaces
-│       ├── Dockerfile          # Production Nginx container
-│       └── nginx.conf          # Reverse proxy configuration
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/         # Endpoints (Projects, Workloads, ML, RAG, Agents, Deployments, Incidents)
+│   │   ├── core/           # Config, RBAC security, Prometheus telemetry, Structured JSON logs, Errors
+│   │   ├── db/             # Async SQLAlchemy session & base
+│   │   ├── models/         # Database models (Org, Project, Workload, Model, Deployment, etc.)
+│   │   ├── schemas/        # Pydantic v2 schemas with ConfigDict
+│   │   ├── services/       # ML service, RAG vector service, LangGraph agent runtime, Eval gates
+│   │   ├── main.py         # FastAPI application entrypoint
+│   │   └── seed.py         # Deterministic seed data generator
+│   ├── tests/              # Pytest test suite (unit/ & integration/)
+│   ├── migrations/         # Alembic database migrations
+│   └── Dockerfile          # Multi-stage production container
+├── frontend/               # Vite + React 19 + TypeScript + Tailwind CSS Console
+│   ├── src/
+│   │   ├── components/     # Navbar, Sidebar, ErrorBoundary
+│   │   ├── pages/          # Dashboard, ML Studio, RAG Hub, Agent Studio, Evaluations, Deployments, RCA
+│   │   ├── lib/            # Typed frontend API client (api.ts), runtime env.ts
+│   │   └── types.ts        # Domain TypeScript interfaces
+│   ├── Dockerfile          # Production Nginx container
+│   └── nginx.conf          # Reverse proxy configuration
 ├── packages/
 │   ├── cli/                    # Click Python CLI (nuvorix)
 │   └── sdk-python/             # Python SDK client (NuvorixClient)

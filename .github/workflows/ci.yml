@@ -27,16 +27,16 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Check Ruff Code Format
-        run: uv run ruff format --check apps packages
+        run: uv run ruff format --check backend packages
 
       - name: Run Ruff Lint
-        run: uv run ruff check apps packages
+        run: uv run ruff check backend packages
 
       - name: Run Mypy Type Checker
-        run: uv run mypy apps/api/app packages/cli packages/sdk-python
+        run: uv run mypy backend/app packages/cli packages/sdk-python
 
       - name: Run Pytest Test Suite with Coverage
-        run: uv run pytest --cov=apps.api.app -v
+        run: uv run pytest --cov=backend.app -v
 
       - name: Verify OpenAPI Contract Sync
         run: |
@@ -54,26 +54,26 @@ jobs:
         with:
           node-version: 22
           cache: "npm"
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies (Clean Install)
-        working-directory: apps/web
+        working-directory: frontend
         run: npm ci
 
       - name: ESLint Code Quality
-        working-directory: apps/web
+        working-directory: frontend
         run: npm run lint
 
       - name: TypeScript Typecheck (tsc -b)
-        working-directory: apps/web
+        working-directory: frontend
         run: npm run typecheck
 
       - name: Run Frontend Tests (Vitest)
-        working-directory: apps/web
+        working-directory: frontend
         run: npm test
 
       - name: Build Web Console (Vite)
-        working-directory: apps/web
+        working-directory: frontend
         run: npm run build
 
   infra-validation:

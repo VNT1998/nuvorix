@@ -12,7 +12,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from apps.api.app.main import app  # noqa: E402
+from backend.app.main import app  # noqa: E402
 
 
 def export_openapi_schema(output_path: str = "docs/openapi.json") -> None:
