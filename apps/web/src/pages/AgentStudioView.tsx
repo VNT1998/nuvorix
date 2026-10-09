@@ -22,16 +22,16 @@ export const AgentStudioView: React.FC<AgentStudioViewProps> = ({
   const [result, setResult] = useState<AgentRunResponse | null>(null);
   const [tools, setTools] = useState<ToolDeclaration[]>([]);
 
-  useEffect(() => {
-    loadTools();
-  }, []);
-
   const loadTools = async () => {
     try {
       const t = await api.getTools();
       setTools(t);
     } catch (_) {}
   };
+
+  useEffect(() => {
+    loadTools();
+  }, []);
 
   const handleRunAgent = async (e: React.FormEvent) => {
     e.preventDefault();

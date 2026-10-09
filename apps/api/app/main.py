@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from apps.api.app.api.v1.agents import router as agents_router
 from apps.api.app.api.v1.audit import router as audit_router
@@ -17,9 +18,14 @@ from apps.api.app.api.v1.models import router as models_router
 from apps.api.app.api.v1.projects import router as projects_router
 from apps.api.app.api.v1.workloads import router as workloads_router
 from apps.api.app.core.config import settings
+from apps.api.app.core.errors import NuvorixError
+from apps.api.app.core.logging import configure_logging
 from apps.api.app.core.telemetry import record_http_request
 from apps.api.app.db.session import AsyncSessionLocal, init_db
 from apps.api.app.seed import seed_demo_data
+
+# Initialize logging
+configure_logging(json_format=(settings.ENVIRONMENT == "production"))
 
 
 @asynccontextmanager
@@ -84,6 +90,21 @@ async def telemetry_middleware(request: Request, call_next):
         )
         return response
 
+
+# Global Exception Handler for Custom Domain Errors
+@app.exception_handler(NuvorixError)
+async def nuvorix_exception_handler(request: Request, exc: NuvorixError):
+    req_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.message,
+            "error_code": exc.error_code,
+            "details": exc.details,
+            "request_id": req_id,
+        },
+        headers={"X-Request-ID": req_id},
+    )
 
 
 # Mount Health & Telemetry Routes

@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  backend-test-and-lint:
-    name: Backend Lint & Pytest
+  backend-quality-gate:
+    name: Backend Quality Gate (Lint, Format, Mypy, Pytest & Contract)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,14 +26,25 @@ jobs:
       - name: Install Python dependencies (Frozen with Dev)
         run: uv sync --frozen --extra dev
 
+      - name: Check Ruff Code Format
+        run: uv run ruff format --check apps packages
+
       - name: Run Ruff Lint
         run: uv run ruff check apps packages
 
-      - name: Run Pytest Test Suite
-        run: uv run pytest -v
+      - name: Run Mypy Type Checker
+        run: uv run mypy apps/api/app packages/cli packages/sdk-python
 
-  frontend-build:
-    name: Frontend Typecheck & Build
+      - name: Run Pytest Test Suite with Coverage
+        run: uv run pytest --cov=apps.api.app -v
+
+      - name: Verify OpenAPI Contract Sync
+        run: |
+          uv run python scripts/gen_openapi_schema.py
+          git diff --exit-code docs/openapi.json
+
+  frontend-quality-gate:
+    name: Frontend Quality Gate (Lint, Typecheck, Test & Build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +59,18 @@ jobs:
       - name: Install dependencies (Clean Install)
         working-directory: apps/web
         run: npm ci
+
+      - name: ESLint Code Quality
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: TypeScript Typecheck (tsc -b)
+        working-directory: apps/web
+        run: npm run typecheck
+
+      - name: Run Frontend Tests (Vitest)
+        working-directory: apps/web
+        run: npm test
 
       - name: Build Web Console (Vite)
         working-directory: apps/web

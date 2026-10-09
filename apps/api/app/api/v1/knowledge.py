@@ -31,7 +31,11 @@ async def _verify_kb_org(db: AsyncSession, kb_id: str, org_id: str) -> Knowledge
     return kb
 
 
-@router.post("/projects/{project_id}/knowledge-bases", response_model=KnowledgeBaseResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/projects/{project_id}/knowledge-bases",
+    response_model=KnowledgeBaseResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_knowledge_base(
     project_id: str,
     payload: KnowledgeBaseCreate,
@@ -39,7 +43,9 @@ async def create_knowledge_base(
     user: UserSession = Depends(require_permission("knowledge:ingest")),
 ):
     res_p = await db.execute(
-        select(Project).where(Project.id == project_id, Project.organization_id == user.organization_id)
+        select(Project).where(
+            Project.id == project_id, Project.organization_id == user.organization_id
+        )
     )
     if not res_p.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Project not found")
@@ -63,13 +69,17 @@ async def list_project_knowledge_bases(
     user: UserSession = Depends(require_permission("knowledge:query")),
 ):
     res_p = await db.execute(
-        select(Project).where(Project.id == project_id, Project.organization_id == user.organization_id)
+        select(Project).where(
+            Project.id == project_id, Project.organization_id == user.organization_id
+        )
     )
     if not res_p.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Project not found")
 
     res = await db.execute(
-        select(KnowledgeBase).where(KnowledgeBase.project_id == project_id).order_by(KnowledgeBase.created_at.desc())
+        select(KnowledgeBase)
+        .where(KnowledgeBase.project_id == project_id)
+        .order_by(KnowledgeBase.created_at.desc())
     )
     return list(res.scalars().all())
 
@@ -97,7 +107,11 @@ async def get_knowledge_base(
     return await _verify_kb_org(db, kb_id, user.organization_id)
 
 
-@router.post("/knowledge-bases/{kb_id}/documents", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/knowledge-bases/{kb_id}/documents",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def ingest_document(
     kb_id: str,
     payload: DocumentIngestRequest,
@@ -117,7 +131,7 @@ async def ingest_document(
         )
         return doc
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/knowledge-bases/{kb_id}/documents", response_model=list[DocumentResponse])
@@ -128,7 +142,9 @@ async def list_documents(
 ):
     await _verify_kb_org(db, kb_id, user.organization_id)
     res = await db.execute(
-        select(KnowledgeDocument).where(KnowledgeDocument.knowledge_base_id == kb_id).order_by(KnowledgeDocument.created_at.desc())
+        select(KnowledgeDocument)
+        .where(KnowledgeDocument.knowledge_base_id == kb_id)
+        .order_by(KnowledgeDocument.created_at.desc())
     )
     return list(res.scalars().all())
 

@@ -16,7 +16,9 @@ async def setup_database():
 @pytest.mark.asyncio
 async def test_health_and_ready():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         # 1. Health check
         resp = await client.get("/health")
         assert resp.status_code == 200
@@ -38,7 +40,9 @@ async def test_health_and_ready():
 @pytest.mark.asyncio
 async def test_projects_and_workloads_crud():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         # Create project
         resp = await client.post(
             "/api/v1/projects",
@@ -73,7 +77,9 @@ async def test_projects_and_workloads_crud():
 @pytest.mark.asyncio
 async def test_ml_model_training_and_promotion():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         # Fetch seeded ml workload
         res_ws = await client.get("/api/v1/workloads")
         ml_workload = next(w for w in res_ws.json() if w["type"] == "ml_model")
@@ -105,7 +111,9 @@ async def test_ml_model_training_and_promotion():
 @pytest.mark.asyncio
 async def test_rag_ingest_and_retrieval():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         # List knowledge bases
         res_kb = await client.get("/api/v1/knowledge-bases")
         kb = res_kb.json()[0]
@@ -138,7 +146,9 @@ async def test_rag_ingest_and_retrieval():
 @pytest.mark.asyncio
 async def test_agent_execution_with_tools():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         # Check tools list
         tools_resp = await client.get("/api/v1/agents/tools")
         assert tools_resp.status_code == 200
@@ -166,7 +176,9 @@ async def test_agent_execution_with_tools():
 @pytest.mark.asyncio
 async def test_evaluation_quality_gate_allow_and_block():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         res_ws = await client.get("/api/v1/workloads")
         agent_w = next(w for w in res_ws.json() if w["type"] == "agent")
 
@@ -197,7 +209,9 @@ async def test_evaluation_quality_gate_allow_and_block():
 @pytest.mark.asyncio
 async def test_deployment_and_rollback():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         res_ws = await client.get("/api/v1/workloads")
         agent_w = next(w for w in res_ws.json() if w["type"] == "agent")
 
@@ -229,7 +243,9 @@ async def test_deployment_and_rollback():
 @pytest.mark.asyncio
 async def test_incident_remediation():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         incidents = await client.get("/api/v1/incidents")
         assert incidents.status_code == 200
         inc_list = incidents.json()
@@ -238,7 +254,9 @@ async def test_incident_remediation():
         assert inc["status"] in ["open", "resolved"]
 
         # Remediate incident
-        rem_resp = await client.post(f"/api/v1/incidents/{inc['id']}/remediate", json={"action": "rollback"})
+        rem_resp = await client.post(
+            f"/api/v1/incidents/{inc['id']}/remediate", json={"action": "rollback"}
+        )
         assert rem_resp.status_code == 200
         assert rem_resp.json()["status"] == "resolved"
 
@@ -246,7 +264,9 @@ async def test_incident_remediation():
 @pytest.mark.asyncio
 async def test_gateway_chat_and_finops():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as client:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as client:
         res_ws = await client.get("/api/v1/workloads")
         w = res_ws.json()[0]
 

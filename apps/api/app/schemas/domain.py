@@ -90,7 +90,9 @@ class ModelVersionResponse(BaseModel):
 class TrainModelRequest(BaseModel):
     model_name: str = "linear_regressor"
     dataset_name: str | None = "california_housing_demo"
-    hyperparameters: dict[str, Any] = Field(default_factory=lambda: {"alpha": 1.0, "max_iter": 1000})
+    hyperparameters: dict[str, Any] = Field(
+        default_factory=lambda: {"alpha": 1.0, "max_iter": 1000}
+    )
 
 
 class TrainModelResponse(BaseModel):

@@ -10,7 +10,9 @@ from apps.api.app.services.eval_service import EvaluationEngineService
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}) as ac:
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers={"X-User-Role": "admin"}
+    ) as ac:
         yield ac
 
 
@@ -52,7 +54,12 @@ async def test_rag_and_agent_evaluation_metrics():
         assert "avg_latency_ms" in metrics
         assert "p95_latency_ms" in metrics
         assert "max_latency_ms" in metrics
-        assert metrics["min_latency_ms"] <= metrics["median_latency_ms"] <= metrics["p95_latency_ms"] <= metrics["max_latency_ms"]
+        assert (
+            metrics["min_latency_ms"]
+            <= metrics["median_latency_ms"]
+            <= metrics["p95_latency_ms"]
+            <= metrics["max_latency_ms"]
+        )
 
         # 4. Cost metrics with explicit estimated_local mode
         assert "cost" in metrics

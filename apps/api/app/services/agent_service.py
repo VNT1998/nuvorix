@@ -69,7 +69,9 @@ class AgentRuntimeService:
         Enforces tenant boundaries, role authorization, and stateful side-effects.
         """
         if not context:
-            raise ValueError("Mandatory context missing: ExecutionContext is required for tool execution.")
+            raise ValueError(
+                "Mandatory context missing: ExecutionContext is required for tool execution."
+            )
         ctx = context
 
         try:
@@ -100,16 +102,25 @@ class AgentRuntimeService:
                     if first_kb:
                         kb_id = first_kb.id
                     else:
-                        return {"results": [], "count": 0, "message": "No knowledge base registered for this organization."}
+                        return {
+                            "results": [],
+                            "count": 0,
+                            "message": "No knowledge base registered for this organization.",
+                        }
                 else:
                     # Verify provided KB belongs to caller's organization
                     res_kb = await db.execute(
                         select(KnowledgeBase)
                         .join(Project, KnowledgeBase.project_id == Project.id)
-                        .where(KnowledgeBase.id == kb_id, Project.organization_id == ctx.organization_id)
+                        .where(
+                            KnowledgeBase.id == kb_id,
+                            Project.organization_id == ctx.organization_id,
+                        )
                     )
                     if not res_kb.scalar_one_or_none():
-                        return {"error": f"Knowledge base '{kb_id}' not found or unauthorized for organization."}
+                        return {
+                            "error": f"Knowledge base '{kb_id}' not found or unauthorized for organization."
+                        }
 
                 results = await RAGPlatformService.query_knowledge_base(
                     db=db,
@@ -140,11 +151,22 @@ class AgentRuntimeService:
 
                 output = {
                     "workloads": [
-                        {"id": w.id, "name": w.name, "type": w.type, "status": w.status, "version": w.active_version}
+                        {
+                            "id": w.id,
+                            "name": w.name,
+                            "type": w.type,
+                            "status": w.status,
+                            "version": w.active_version,
+                        }
                         for w in workloads
                     ],
                     "recent_deployments": [
-                        {"id": d.id, "version": d.version, "environment": d.environment, "status": d.status}
+                        {
+                            "id": d.id,
+                            "version": d.version,
+                            "environment": d.environment,
+                            "status": d.status,
+                        }
                         for d in deployments
                     ],
                 }
@@ -169,12 +191,17 @@ class AgentRuntimeService:
                     select(Deployment)
                     .join(Workload, Deployment.workload_id == Workload.id)
                     .join(Project, Workload.project_id == Project.id)
-                    .where(Deployment.id == target_dep_id, Project.organization_id == ctx.organization_id)
+                    .where(
+                        Deployment.id == target_dep_id,
+                        Project.organization_id == ctx.organization_id,
+                    )
                 )
                 res_dep = await db.execute(query_dep)
                 deployment = res_dep.scalar_one_or_none()
                 if not deployment:
-                    return {"error": f"Target deployment '{target_dep_id}' not found or unauthorized for this organization."}
+                    return {
+                        "error": f"Target deployment '{target_dep_id}' not found or unauthorized for this organization."
+                    }
 
                 # Idempotency check: if circuit is already open, do not duplicate side-effects
                 if deployment.status == "circuit_open":
@@ -195,7 +222,9 @@ class AgentRuntimeService:
                 deployment.status = "circuit_open"
                 deployment.traffic_percentage = 0
 
-                res_wl = await db.execute(select(Workload).where(Workload.id == deployment.workload_id))
+                res_wl = await db.execute(
+                    select(Workload).where(Workload.id == deployment.workload_id)
+                )
                 workload = res_wl.scalar_one_or_none()
                 if workload:
                     workload.status = "degraded"
@@ -243,17 +272,40 @@ class AgentRuntimeService:
             return {"error": str(e)}
 
     @classmethod
-    def route_prompt_to_tool(cls, prompt: str, knowledge_base_id: str | None = None) -> tuple[str | None, dict[str, Any]]:
+    def route_prompt_to_tool(
+        cls, prompt: str, knowledge_base_id: str | None = None
+    ) -> tuple[str | None, dict[str, Any]]:
         """Determine appropriate tool and parameters based on natural language prompt intent."""
         prompt_lower = prompt.lower()
-        if any(w in prompt_lower for w in ["search", "find", "how", "what", "doc", "spec", "rag", "knowledge", "architecture"]):
+        if any(
+            w in prompt_lower
+            for w in [
+                "search",
+                "find",
+                "how",
+                "what",
+                "doc",
+                "spec",
+                "rag",
+                "knowledge",
+                "architecture",
+            ]
+        ):
             return "knowledge_search", {"query": prompt, "knowledge_base_id": knowledge_base_id}
-        elif any(w in prompt_lower for w in ["status", "deploy", "workload", "health", "system", "pods", "active"]):
+        elif any(
+            w in prompt_lower
+            for w in ["status", "deploy", "workload", "health", "system", "pods", "active"]
+        ):
             return "project_deployment_status", {}
         elif any(w in prompt_lower for w in ["diagnostic", "latency", "memory", "db", "check"]):
             return "diagnostic_check", {}
-        elif any(w in prompt_lower for w in ["halt", "stop", "circuit", "kill", "block", "emergency"]):
-            return "emergency_circuit_breaker", {"reason": "Operator emergency invoke", "confirmed": False}
+        elif any(
+            w in prompt_lower for w in ["halt", "stop", "circuit", "kill", "block", "emergency"]
+        ):
+            return "emergency_circuit_breaker", {
+                "reason": "Operator emergency invoke",
+                "confirmed": False,
+            }
         return None, {}
 
     @classmethod
@@ -272,15 +324,23 @@ class AgentRuntimeService:
         """
         start_overall = time.time()
         if not context:
-            raise ValueError("Mandatory context missing: ExecutionContext is required for agent workflow execution.")
+            raise ValueError(
+                "Mandatory context missing: ExecutionContext is required for agent workflow execution."
+            )
         ctx = context
 
         async def planner_node(state: AgentState) -> dict[str, Any]:
             t0 = time.time()
             prompt_str = state.get("prompt", "")
-            selected_tool, tool_params = cls.route_prompt_to_tool(prompt_str, state.get("knowledge_base_id"))
+            selected_tool, tool_params = cls.route_prompt_to_tool(
+                prompt_str, state.get("knowledge_base_id")
+            )
 
-            decision_text = f"Route to LangGraph tool_executor node for `{selected_tool}`" if selected_tool else "Route directly to LangGraph synthesizer node"
+            decision_text = (
+                f"Route to LangGraph tool_executor node for `{selected_tool}`"
+                if selected_tool
+                else "Route directly to LangGraph synthesizer node"
+            )
             step_record = {
                 "step": 1,
                 "stage": "planner",
@@ -302,14 +362,16 @@ class AgentRuntimeService:
             tools_used = list(state.get("tools_used", []))
 
             t_call = time.time()
-            steps.append({
-                "step": len(steps) + 1,
-                "stage": "tool_call",
-                "content": f"LangGraph Tool Node: Invoking registered tool `{selected_tool}` with parameters {tool_params}",
-                "tool_name": selected_tool,
-                "tool_input": tool_params,
-                "latency_ms": round((time.time() - t_call) * 1000, 2),
-            })
+            steps.append(
+                {
+                    "step": len(steps) + 1,
+                    "stage": "tool_call",
+                    "content": f"LangGraph Tool Node: Invoking registered tool `{selected_tool}` with parameters {tool_params}",
+                    "tool_name": selected_tool,
+                    "tool_input": tool_params,
+                    "latency_ms": round((time.time() - t_call) * 1000, 2),
+                }
+            )
 
             t_obs = time.time()
             obs = await cls.execute_tool(
@@ -321,14 +383,16 @@ class AgentRuntimeService:
                 confirmed=bool(tool_params.get("confirmed", False)),
             )
 
-            steps.append({
-                "step": len(steps) + 1,
-                "stage": "observation",
-                "content": "LangGraph Tool Node: Received observation response from execution environment",
-                "tool_name": selected_tool,
-                "tool_output": obs,
-                "latency_ms": round((time.time() - t_obs) * 1000, 2),
-            })
+            steps.append(
+                {
+                    "step": len(steps) + 1,
+                    "stage": "observation",
+                    "content": "LangGraph Tool Node: Received observation response from execution environment",
+                    "tool_name": selected_tool,
+                    "tool_output": obs,
+                    "latency_ms": round((time.time() - t_obs) * 1000, 2),
+                }
+            )
 
             return {
                 "tool_observation": obs,
@@ -347,7 +411,9 @@ class AgentRuntimeService:
             if selected_tool == "knowledge_search" and obs and "results" in obs:
                 res_items = obs["results"]
                 if res_items:
-                    sources_str = ", ".join([f"`{r.get('source')}` (score: {r.get('score')})" for r in res_items])
+                    sources_str = ", ".join(
+                        [f"`{r.get('source')}` (score: {r.get('score')})" for r in res_items]
+                    )
                     first_excerpt = res_items[0].get("text", "")
                     final_text = (
                         f"Based on retrieved documentation from Nuvorix knowledge repository:\n\n"
@@ -374,20 +440,24 @@ class AgentRuntimeService:
             elif selected_tool == "emergency_circuit_breaker":
                 if obs and "error" in obs:
                     final_text = f"Action blocked: {obs.get('error')}"
-                else:
+                elif obs:
                     final_text = f"Emergency circuit breaker successfully triggered on deployment `{obs.get('deployment_id')}`. Inbound traffic halted to 0%."
+                else:
+                    final_text = "Emergency circuit breaker executed without observation."
             else:
                 final_text = (
                     f"Nuvorix Agent received your request: '{prompt_str}'. "
                     f"LangGraph StateGraph verified safety invariants and executed deterministic workflow."
                 )
 
-            steps.append({
-                "step": len(steps) + 1,
-                "stage": "response",
-                "content": final_text,
-                "latency_ms": round((time.time() - t0) * 1000, 2),
-            })
+            steps.append(
+                {
+                    "step": len(steps) + 1,
+                    "stage": "response",
+                    "content": final_text,
+                    "latency_ms": round((time.time() - t0) * 1000, 2),
+                }
+            )
 
             return {
                 "final_response": final_text,
@@ -439,7 +509,10 @@ class AgentRuntimeService:
         out_tokens = len(final_text.split()) * 2
         total_tokens = in_tokens + out_tokens + 150
         from apps.api.app.services.gateway_service import calculate_token_cost
-        estimated_cost = calculate_token_cost("local", "nuvorix-state-machine", in_tokens, out_tokens)
+
+        estimated_cost = calculate_token_cost(
+            "local", "nuvorix-state-machine", in_tokens, out_tokens
+        )
 
         record_llm_usage(
             provider="langgraph-orchestrator",

@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -6,7 +7,7 @@ from apps.api.app.core.config import settings
 from apps.api.app.models.entities import Base
 
 # Engine configuration supporting both SQLite (aiosqlite) and PostgreSQL (asyncpg)
-engine_kwargs = {"echo": False}
+engine_kwargs: dict[str, Any] = {"echo": False}
 if "sqlite" in settings.DATABASE_URL:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 

@@ -1,0 +1,55 @@
+.PHONY: all help install dev lint format typecheck test test-cov build gen-api check clean docker-up docker-down
+
+help:
+	@echo "Nuvorix Engineering Commands:"
+	@echo "  make install     - Install all backend (uv) and frontend (npm) dependencies"
+	@echo "  make lint        - Run Ruff linting and frontend ESLint"
+	@echo "  make format      - Run Ruff code formatting"
+	@echo "  make typecheck   - Run Mypy (backend) and TypeScript compiler (frontend)"
+	@echo "  make test        - Run backend pytest and frontend Vitest"
+	@echo "  make test-cov    - Run pytest with code coverage report"
+	@echo "  make build       - Build frontend bundle and verify backend packaging"
+	@echo "  make gen-api     - Export backend OpenAPI schema to docs/openapi.json"
+	@echo "  make check       - Execute full quality gate (lint, format check, typecheck, test, build)"
+	@echo "  make docker-up   - Start full platform stack via docker compose"
+	@echo "  make docker-down - Stop docker compose services"
+
+install:
+	uv sync --extra dev
+	cd apps/web && npm install
+
+lint:
+	uv run ruff check apps packages
+	cd apps/web && npm run lint
+
+format:
+	uv run ruff format apps packages
+
+typecheck:
+	uv run mypy apps/api/app packages/cli packages/sdk-python
+	cd apps/web && npm run typecheck
+
+test:
+	uv run pytest -v
+	cd apps/web && npm test
+
+test-cov:
+	uv run pytest --cov=apps.api.app --cov-report=term-missing --cov-report=html:coverage_html -v
+
+build:
+	cd apps/web && npm run build
+
+gen-api:
+	uv run python scripts/gen_openapi_schema.py
+
+check: lint typecheck test-cov build
+	@echo "=== Nuvorix Quality Gate Passed Successfully ==="
+
+docker-up:
+	docker compose up --build -d
+
+docker-down:
+	docker compose down
+
+clean:
+	rm -rf .pytest_cache .ruff_cache htmlcov coverage_html apps/web/dist apps/web/node_modules/.vite

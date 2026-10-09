@@ -52,7 +52,7 @@ async def run_evaluation(
             completed_at=res["completed_at"],
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/workloads/{workload_id}/evaluations", response_model=list[EvaluationRunResponse])

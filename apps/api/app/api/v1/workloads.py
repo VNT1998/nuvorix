@@ -11,7 +11,11 @@ from apps.api.app.schemas.domain import WorkloadCreate, WorkloadResponse
 router = APIRouter(tags=["Workloads"])
 
 
-@router.post("/projects/{project_id}/workloads", response_model=WorkloadResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/projects/{project_id}/workloads",
+    response_model=WorkloadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_workload(
     project_id: str,
     payload: WorkloadCreate,
@@ -19,7 +23,9 @@ async def create_workload(
     user: UserSession = Depends(require_permission("workloads:create")),
 ):
     res_p = await db.execute(
-        select(Project).where(Project.id == project_id, Project.organization_id == user.organization_id)
+        select(Project).where(
+            Project.id == project_id, Project.organization_id == user.organization_id
+        )
     )
     if not res_p.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Project not found")
@@ -32,7 +38,7 @@ async def create_workload(
     )
     db.add(workload)
     await db.flush()
-    
+
     audit = AuditEvent(
         organization_id=user.organization_id,
         user_id=user.user_id,
@@ -55,13 +61,17 @@ async def list_project_workloads(
     user: UserSession = Depends(require_permission("workloads:read")),
 ):
     res_p = await db.execute(
-        select(Project).where(Project.id == project_id, Project.organization_id == user.organization_id)
+        select(Project).where(
+            Project.id == project_id, Project.organization_id == user.organization_id
+        )
     )
     if not res_p.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Project not found")
 
     res = await db.execute(
-        select(Workload).where(Workload.project_id == project_id).order_by(Workload.created_at.desc())
+        select(Workload)
+        .where(Workload.project_id == project_id)
+        .order_by(Workload.created_at.desc())
     )
     return list(res.scalars().all())
 

@@ -48,39 +48,61 @@ class UserSession(BaseModel):
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "admin": {
-        "projects:create", "projects:delete", "projects:read",
-        "workloads:create", "workloads:delete", "workloads:read",
-        "models:train", "models:register", "models:promote",
-        "evaluations:run", "evaluations:approve",
-        "deployments:create", "deployments:rollback", "deployments:bypass_gate",
-        "knowledge:ingest", "knowledge:query",
-        "agents:run", "agents:tools:execute_high_risk",
-        "incidents:resolve", "incidents:remediate",
+        "projects:create",
+        "projects:delete",
+        "projects:read",
+        "workloads:create",
+        "workloads:delete",
+        "workloads:read",
+        "models:train",
+        "models:register",
+        "models:promote",
+        "evaluations:run",
+        "evaluations:approve",
+        "deployments:create",
+        "deployments:rollback",
+        "deployments:bypass_gate",
+        "knowledge:ingest",
+        "knowledge:query",
+        "agents:run",
+        "agents:tools:execute_high_risk",
+        "incidents:resolve",
+        "incidents:remediate",
         "audit:read",
     },
     "platform_engineer": {
         "projects:read",
-        "workloads:create", "workloads:read",
-        "evaluations:run", "evaluations:approve",
-        "deployments:create", "deployments:rollback",
+        "workloads:create",
+        "workloads:read",
+        "evaluations:run",
+        "evaluations:approve",
+        "deployments:create",
+        "deployments:rollback",
         "knowledge:query",
-        "agents:run", "agents:tools:execute_high_risk",
-        "incidents:resolve", "incidents:remediate",
+        "agents:run",
+        "agents:tools:execute_high_risk",
+        "incidents:resolve",
+        "incidents:remediate",
         "audit:read",
     },
     "ml_engineer": {
         "projects:read",
-        "workloads:create", "workloads:read",
-        "models:train", "models:register", "models:promote",
+        "workloads:create",
+        "workloads:read",
+        "models:train",
+        "models:register",
+        "models:promote",
         "evaluations:run",
         "deployments:create",
-        "knowledge:ingest", "knowledge:query",
+        "knowledge:ingest",
+        "knowledge:query",
         "agents:run",
         "audit:read",
     },
     "developer": {
         "projects:read",
-        "workloads:create", "workloads:read",
+        "workloads:create",
+        "workloads:read",
         "evaluations:run",
         "knowledge:query",
         "agents:run",
@@ -266,6 +288,7 @@ def check_permission(user: UserSession | ExecutionContext, required_permission: 
 
 def require_permission(permission: str):
     """FastAPI dependency to enforce RBAC permissions."""
+
     async def dependency(user: UserSession = Depends(get_current_user)) -> UserSession:
         if not check_permission(user, permission):
             raise HTTPException(
@@ -273,4 +296,5 @@ def require_permission(permission: str):
                 detail=f"Role '{user.role}' lacks required permission: '{permission}'",
             )
         return user
+
     return dependency

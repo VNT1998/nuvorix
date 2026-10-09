@@ -47,6 +47,29 @@ async def gateway_chat(
     return GatewayChatResponse(**res)
 
 
+@router.post("/workloads/{workload_id}/gateway/chat/stream")
+async def gateway_chat_stream(
+    workload_id: str,
+    payload: GatewayChatRequest,
+    db: AsyncSession = Depends(get_db),
+    user: UserSession = Depends(require_permission("agents:run")),
+):
+    """Server-Sent Events (SSE) streaming endpoint for real-time LLM token generation."""
+    from fastapi.responses import StreamingResponse
+
+    await _verify_workload_org(db, workload_id, user.organization_id)
+    stream = LLMGatewayService.stream_chat_completion(
+        db=db,
+        workload_id=workload_id,
+        prompt=payload.prompt,
+        provider=payload.provider or "local",
+        model=payload.model or "llama-3-8b-instruct",
+        max_tokens=payload.max_tokens,
+        temperature=payload.temperature,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
+
+
 @router.get("/costs", response_model=CostSummary)
 async def get_costs(
     workload_id: str | None = None,

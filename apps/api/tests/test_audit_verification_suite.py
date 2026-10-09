@@ -283,8 +283,12 @@ async def test_idempotency_cross_tenant_isolation(client: AsyncClient):
         session.add_all([proj_a, proj_b])
         await session.flush()
 
-        wl_a = Workload(id=f"wl-a-{suffix}", project_id=proj_a.id, name="Workload A", type="ml_model")
-        wl_b = Workload(id=f"wl-b-{suffix}", project_id=proj_b.id, name="Workload B", type="ml_model")
+        wl_a = Workload(
+            id=f"wl-a-{suffix}", project_id=proj_a.id, name="Workload A", type="ml_model"
+        )
+        wl_b = Workload(
+            id=f"wl-b-{suffix}", project_id=proj_b.id, name="Workload B", type="ml_model"
+        )
         session.add_all([wl_a, wl_b])
         await session.commit()
 
@@ -380,7 +384,9 @@ async def test_service_tenant_context_mandatory():
 async def test_circuit_breaker_explicit_target_and_intent_routing():
     """Verify prompt router never manufactures confirmed=True and circuit breaker requires explicit target."""
     # 1. Natural language intent routing does NOT manufacture confirmed=True
-    tool, params = AgentRuntimeService.route_prompt_to_tool("Emergency halt and trip circuit breaker now!")
+    tool, params = AgentRuntimeService.route_prompt_to_tool(
+        "Emergency halt and trip circuit breaker now!"
+    )
     assert tool == "emergency_circuit_breaker"
     assert params.get("confirmed") is False
 
@@ -411,10 +417,14 @@ async def test_circuit_breaker_explicit_target_and_intent_routing():
         proj_other = Project(id=f"proj-other-{suffix}", organization_id="org-other", name="Other")
         session.add(proj_other)
         await session.flush()
-        wl_other = Workload(id=f"wl-other-{suffix}", project_id=proj_other.id, name="Other WL", type="agent")
+        wl_other = Workload(
+            id=f"wl-other-{suffix}", project_id=proj_other.id, name="Other WL", type="agent"
+        )
         session.add(wl_other)
         await session.flush()
-        dep_other = Deployment(id=f"dep-other-{suffix}", workload_id=wl_other.id, version="v1.0.0", status="active")
+        dep_other = Deployment(
+            id=f"dep-other-{suffix}", workload_id=wl_other.id, version="v1.0.0", status="active"
+        )
         session.add(dep_other)
         await session.commit()
 
@@ -491,7 +501,10 @@ async def test_llm_gateway_production_fail_closed():
         settings.ENVIRONMENT = "production"
         async with AsyncSessionLocal() as session:
             # Calling remote provider with unconfigured / failing endpoint in production fails fast
-            with pytest.raises(ValueError, match="Fallback to deterministic local demo provider is disabled in production"):
+            with pytest.raises(
+                ValueError,
+                match="Fallback to deterministic local demo provider is disabled in production",
+            ):
                 await LLMGatewayService.chat_completion(
                     db=session,
                     workload_id="wl-test",

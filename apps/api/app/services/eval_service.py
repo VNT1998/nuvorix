@@ -1,7 +1,7 @@
 import datetime
 import os
 import time
-from typing import Any
+from typing import Any, TypedDict
 
 import joblib
 import numpy as np
@@ -24,8 +24,22 @@ from apps.api.app.services.agent_service import AgentRuntimeService
 from apps.api.app.services.ml_service import MLPlatformService
 from apps.api.app.services.rag_service import RAGPlatformService
 
+
+class RAGBenchmarkCase(TypedDict):
+    query: str
+    expected_answer: str
+    expected_sources: list[str]
+    expected_keywords: list[str]
+    min_expected_score: float
+
+
+class ToolBenchmarkCase(TypedDict):
+    prompt: str
+    expected_tool: str
+
+
 # Benchmark dataset for RAG retrieval with ground truth expectations
-RAG_BENCHMARK_CASES = [
+RAG_BENCHMARK_CASES: list[RAGBenchmarkCase] = [
     {
         "query": "What platform invariants does Nuvorix enforce before deployment?",
         "expected_answer": "The control plane enforces automated release gates before any workload version can be promoted to staging or production.",
@@ -50,7 +64,7 @@ RAG_BENCHMARK_CASES = [
 ]
 
 # Benchmark dataset for tool selection evaluation
-TOOL_BENCHMARK_CASES = [
+TOOL_BENCHMARK_CASES: list[ToolBenchmarkCase] = [
     {
         "prompt": "Search the knowledge base for platform invariants and architecture specifications",
         "expected_tool": "knowledge_search",
@@ -110,7 +124,9 @@ class EvaluationEngineService:
             target_version_entity = None
             for m in models:
                 res_v = await db.execute(
-                    select(ModelVersion).where(ModelVersion.model_id == m.id, ModelVersion.version == version)
+                    select(ModelVersion).where(
+                        ModelVersion.model_id == m.id, ModelVersion.version == version
+                    )
                 )
                 v_match = res_v.scalar_one_or_none()
                 if v_match:
@@ -140,12 +156,16 @@ class EvaluationEngineService:
                     regressor = joblib.load(target_version_entity.artifact_uri)
                 except Exception as load_err:
                     regressor = None
-                    reasons.append(f"candidate_artifact_corrupted: failed to deserialize model artifact ({load_err})")
+                    reasons.append(
+                        f"candidate_artifact_corrupted: failed to deserialize model artifact ({load_err})"
+                    )
                     status = "failed"
 
                 if regressor is not None:
                     # 3. Generate held-out evaluation test split
-                    _, _, X_test, y_test = MLPlatformService._generate_synthetic_data(n_samples=500, random_state=100)
+                    _, _, X_test, y_test = MLPlatformService._generate_synthetic_data(
+                        n_samples=500, random_state=100
+                    )
 
                     # 4. Measure repeated inference latency distribution (N=20)
                     latencies_ms: list[float] = []
@@ -191,11 +211,17 @@ class EvaluationEngineService:
                     }
 
                     if rmse > current_policy.max_rmse:
-                        reasons.append(f"Model RMSE {rmse:.2f} exceeded maximum threshold of {current_policy.max_rmse:.2f}")
+                        reasons.append(
+                            f"Model RMSE {rmse:.2f} exceeded maximum threshold of {current_policy.max_rmse:.2f}"
+                        )
                     if accuracy < current_policy.min_accuracy:
-                        reasons.append(f"Model accuracy {accuracy * 100:.1f}% below minimum threshold of {current_policy.min_accuracy * 100:.1f}%")
+                        reasons.append(
+                            f"Model accuracy {accuracy * 100:.1f}% below minimum threshold of {current_policy.min_accuracy * 100:.1f}%"
+                        )
                     if p95_lat > current_policy.max_p95_latency_ms:
-                        reasons.append(f"Inference latency {p95_lat:.1f}ms exceeded limit of {current_policy.max_p95_latency_ms:.1f}ms")
+                        reasons.append(
+                            f"Inference latency {p95_lat:.1f}ms exceeded limit of {current_policy.max_p95_latency_ms:.1f}ms"
+                        )
 
         elif workload.type in ["rag", "agent", "llm_service"]:
             # 1. Empirical Tool Selection Accuracy (evaluate actual prompt router against benchmark)
@@ -249,9 +275,8 @@ class EvaluationEngineService:
                     chunk_text = chunk.get("text", "").lower()
                     retrieved_texts.append(chunk_text)
                     source_id = chunk.get("document_id", "")
-                    is_relevant = (
-                        source_id in case["expected_sources"]
-                        or any(kw in chunk_text for kw in case["expected_keywords"])
+                    is_relevant = source_id in case["expected_sources"] or any(
+                        kw in chunk_text for kw in case["expected_keywords"]
                     )
                     if is_relevant:
                         hit_ranks.append(rank_idx + 1)
@@ -267,7 +292,11 @@ class EvaluationEngineService:
 
                 all_context = " ".join(retrieved_texts)
                 matched_kws = [kw for kw in case["expected_keywords"] if kw in all_context]
-                faith = len(matched_kws) / len(case["expected_keywords"]) if case["expected_keywords"] else 1.0
+                faith = (
+                    len(matched_kws) / len(case["expected_keywords"])
+                    if case["expected_keywords"]
+                    else 1.0
+                )
                 faithfulness_scores.append(faith)
 
                 exp_tokens = set(case["expected_answer"].lower().split())
@@ -298,8 +327,12 @@ class EvaluationEngineService:
             recall_at_3 = round(float(np.mean(recalls_at_3)), 4) if recalls_at_3 else 0.0
             mrr_at_3 = round(float(np.mean(mrr_scores_at_3)), 4) if mrr_scores_at_3 else 0.0
             precision_at_3 = round(float(np.mean(precisions_at_3)), 4) if precisions_at_3 else 0.0
-            faithfulness = round(float(np.mean(faithfulness_scores)), 4) if faithfulness_scores else 0.0
-            answer_correctness = round(float(np.mean(correctness_scores)), 4) if correctness_scores else 0.0
+            faithfulness = (
+                round(float(np.mean(faithfulness_scores)), 4) if faithfulness_scores else 0.0
+            )
+            answer_correctness = (
+                round(float(np.mean(correctness_scores)), 4) if correctness_scores else 0.0
+            )
 
             cost_val = 0.0032
             metrics = {
@@ -371,7 +404,12 @@ class EvaluationEngineService:
             resource_id=eval_run.id,
             request_id=request_id,
             actor_type="user",
-            metadata_json={"version": version, "decision": decision, "passed": passed, "reasons": reasons},
+            metadata_json={
+                "version": version,
+                "decision": decision,
+                "passed": passed,
+                "reasons": reasons,
+            },
         )
         db.add(audit)
         await db.commit()

@@ -8,19 +8,19 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Nuvorix Control Plane"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
-    
+
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./nuvorix.db"
-    
+
     ENVIRONMENT: str = "development"
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
-    
+
     # MLflow
     MLFLOW_TRACKING_URI: str = "sqlite:///mlflow.db"
     MLFLOW_BACKEND_STORE_URI: str | None = None
     MLFLOW_ARTIFACT_ROOT: str | None = None
-    
+
     # Security & RBAC
     AUTH_MODE: str = "development"  # "development" (allows dev headers) or "production" (enforces token validation)
     AUTH_ENABLED: bool = True
@@ -29,16 +29,16 @@ class Settings(BaseSettings):
     DEFAULT_USER_ROLE: str = "developer"
     SECRET_KEY: str = "nuvorix-insecure-dev-secret-key-change-in-production"
     API_KEY_PREFIX: str = "nvx_"
-    
+
     # Observability
     PROMETHEUS_ENABLED: bool = True
     OTEL_ENABLED: bool = True
     OTEL_ENDPOINT: str = "http://localhost:4317"
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
-    
+
     # Artifacts & Local Storage
     ARTIFACT_STORE_PATH: str = "./artifacts"
-    
+
     # CORS
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
@@ -81,11 +81,17 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "Production configuration error: ENVIRONMENT='production' requires PostgreSQL database (DATABASE_URL), SQLite is forbidden."
                 )
-            if not self.MLFLOW_TRACKING_URI or self.MLFLOW_TRACKING_URI.startswith("sqlite") or "localhost" in self.MLFLOW_TRACKING_URI:
+            if (
+                not self.MLFLOW_TRACKING_URI
+                or self.MLFLOW_TRACKING_URI.startswith("sqlite")
+                or "localhost" in self.MLFLOW_TRACKING_URI
+            ):
                 raise ValueError(
                     "Production configuration error: ENVIRONMENT='production' requires an external MLflow tracking URI (not local SQLite or localhost)."
                 )
-            if not self.CORS_ORIGINS or any("localhost" in origin or "127.0.0.1" in origin for origin in self.CORS_ORIGINS):
+            if not self.CORS_ORIGINS or any(
+                "localhost" in origin or "127.0.0.1" in origin for origin in self.CORS_ORIGINS
+            ):
                 raise ValueError(
                     "Production configuration error: ENVIRONMENT='production' requires explicit non-localhost CORS_ORIGINS."
                 )

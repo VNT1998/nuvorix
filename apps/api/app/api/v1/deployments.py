@@ -23,7 +23,11 @@ async def _verify_workload_org(db: AsyncSession, workload_id: str, org_id: str) 
     return workload
 
 
-@router.post("/workloads/{workload_id}/deployments", response_model=DeploymentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/workloads/{workload_id}/deployments",
+    response_model=DeploymentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_deployment(
     workload_id: str,
     payload: DeploymentCreate,
@@ -60,7 +64,7 @@ async def create_deployment(
         )
         return dep
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/workloads/{workload_id}/deployments", response_model=list[DeploymentResponse])
@@ -71,7 +75,9 @@ async def list_workload_deployments(
 ):
     await _verify_workload_org(db, workload_id, user.organization_id)
     res = await db.execute(
-        select(Deployment).where(Deployment.workload_id == workload_id).order_by(Deployment.created_at.desc())
+        select(Deployment)
+        .where(Deployment.workload_id == workload_id)
+        .order_by(Deployment.created_at.desc())
     )
     return list(res.scalars().all())
 
@@ -117,4 +123,4 @@ async def rollback_deployment(
         )
         return RollbackResponse(**res)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e

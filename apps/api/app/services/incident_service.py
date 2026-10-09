@@ -125,7 +125,9 @@ class IncidentRCAService:
 
         # 2. If no deployment linked, find active deployment in project workloads
         if not target_dep:
-            res_w = await db.execute(select(Workload).where(Workload.project_id == incident.project_id))
+            res_w = await db.execute(
+                select(Workload).where(Workload.project_id == incident.project_id)
+            )
             workloads = res_w.scalars().all()
             for w in workloads:
                 res_d = await db.execute(
@@ -140,7 +142,9 @@ class IncidentRCAService:
                     break
 
         if not target_dep:
-            raise ValueError(f"No active deployment found in project '{incident.project_id}' to rollback.")
+            raise ValueError(
+                f"No active deployment found in project '{incident.project_id}' to rollback."
+            )
 
         # 3. Perform remediation rollback
         rollback_info = await DeploymentPlatformService.rollback_deployment(
@@ -163,8 +167,16 @@ class IncidentRCAService:
             request_id=request_id,
             actor_type="user",
             reason=f"Incident remediation via {action}",
-            before_state_json={"status": before_status, "deployment_id": target_dep.id, "deployment_status": "active"},
-            after_state_json={"status": "resolved", "action": action, "remediated_deployment_id": target_dep.id},
+            before_state_json={
+                "status": before_status,
+                "deployment_id": target_dep.id,
+                "deployment_status": "active",
+            },
+            after_state_json={
+                "status": "resolved",
+                "action": action,
+                "remediated_deployment_id": target_dep.id,
+            },
             metadata_json={"action": action, "rollback_result": rollback_info},
         )
         db.add(audit)

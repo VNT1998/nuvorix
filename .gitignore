@@ -35,6 +35,7 @@ venv.bak/
 .ruff_cache/
 .coverage
 htmlcov/
+coverage_html/
 .tox/
 
 # Local databases & run data

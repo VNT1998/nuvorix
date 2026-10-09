@@ -11,12 +11,16 @@ from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
 
+from apps.api.app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # --- OpenTelemetry Tracing Infrastructure ---
 
+
 class RingBufferSpanExporter(SpanExporter):
     """Thread-safe ring buffer storing recent spans for real-time observability."""
+
     def __init__(self, maxlen: int = 200):
         self._spans: deque = deque(maxlen=maxlen)
         self._lock = threading.Lock()
@@ -26,17 +30,21 @@ class RingBufferSpanExporter(SpanExporter):
             for s in spans:
                 start_ns = s.start_time or 0
                 end_ns = s.end_time or 0
-                duration_ms = round((end_ns - start_ns) / 1_000_000.0, 2) if end_ns > start_ns else 0.0
+                duration_ms = (
+                    round((end_ns - start_ns) / 1_000_000.0, 2) if end_ns > start_ns else 0.0
+                )
 
-                self._spans.append({
-                    "name": s.name,
-                    "trace_id": format(s.context.trace_id, "032x"),
-                    "span_id": format(s.context.span_id, "016x"),
-                    "parent_id": format(s.parent.span_id, "016x") if s.parent else None,
-                    "duration_ms": duration_ms,
-                    "status": s.status.status_code.name,
-                    "attributes": dict(s.attributes) if s.attributes else {},
-                })
+                self._spans.append(
+                    {
+                        "name": s.name,
+                        "trace_id": format(s.context.trace_id, "032x"),
+                        "span_id": format(s.context.span_id, "016x"),
+                        "parent_id": format(s.parent.span_id, "016x") if s.parent else None,
+                        "duration_ms": duration_ms,
+                        "status": s.status.status_code.name,
+                        "attributes": dict(s.attributes) if s.attributes else {},
+                    }
+                )
         return SpanExportResult.SUCCESS
 
     def get_recent_spans(self) -> list[dict[str, Any]]:
@@ -51,13 +59,13 @@ class RingBufferSpanExporter(SpanExporter):
         pass
 
 
-from apps.api.app.core.config import settings
-
-_resource = Resource.create({
-    "service.name": "nuvorix-control-plane",
-    "service.version": settings.VERSION,
-    "deployment.environment": settings.ENVIRONMENT,
-})
+_resource = Resource.create(
+    {
+        "service.name": "nuvorix-control-plane",
+        "service.version": settings.VERSION,
+        "deployment.environment": settings.ENVIRONMENT,
+    }
+)
 _provider = TracerProvider(resource=_resource)
 _span_exporter = RingBufferSpanExporter(maxlen=200)
 _provider.add_span_processor(SimpleSpanProcessor(_span_exporter))
@@ -212,4 +220,3 @@ def record_llm_usage(
     LLM_INPUT_TOKENS_TOTAL.labels(provider=provider, model=model).inc(input_tokens)
     LLM_OUTPUT_TOKENS_TOTAL.labels(provider=provider, model=model).inc(output_tokens)
     LLM_COST_TOTAL.labels(provider=provider, model=model).inc(cost)
-

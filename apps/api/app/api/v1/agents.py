@@ -45,7 +45,9 @@ async def run_agent(
     user: UserSession = Depends(require_permission("agents:run")),
 ):
     await _verify_workload_org(db, workload_id, user.organization_id)
-    if payload.allow_high_risk_tools and not check_permission(user, "agents:tools:execute_high_risk"):
+    if payload.allow_high_risk_tools and not check_permission(
+        user, "agents:tools:execute_high_risk"
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Role '{user.role}' lacks required permission: 'agents:tools:execute_high_risk'",
@@ -62,7 +64,7 @@ async def run_agent(
         )
         return AgentRunResponse(**res)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/agents/graph")
@@ -103,6 +105,7 @@ async def list_tools(
 
 
 # --- Model Context Protocol (MCP) Standard Endpoints ---
+
 
 @router.get("/mcp/tools")
 async def mcp_list_tools(

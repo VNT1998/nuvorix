@@ -24,31 +24,49 @@ class WorkloadsResource(_ResourceBase):
         return self._client._get("/api/v1/workloads")
 
     def create(self, project_id: str, name: str, workload_type: str = "agent") -> dict[str, Any]:
-        return self._client._post(f"/api/v1/projects/{project_id}/workloads", {"name": name, "type": workload_type})
+        return self._client._post(
+            f"/api/v1/projects/{project_id}/workloads", {"name": name, "type": workload_type}
+        )
 
     def get(self, workload_id: str) -> dict[str, Any]:
         return self._client._get(f"/api/v1/workloads/{workload_id}")
 
 
 class ModelsResource(_ResourceBase):
-    def train(self, workload_id: str, model_name: str = "regressor", hyperparameters: dict[str, Any] | None = None) -> dict[str, Any]:
+    def train(
+        self,
+        workload_id: str,
+        model_name: str = "regressor",
+        hyperparameters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         payload = {"model_name": model_name, "hyperparameters": hyperparameters or {}}
         return self._client._post(f"/api/v1/workloads/{workload_id}/train", payload)
 
     def promote(self, version_id: str, target_environment: str = "staging") -> dict[str, Any]:
-        return self._client._post(f"/api/v1/model-versions/{version_id}/promote", {"target_environment": target_environment})
+        return self._client._post(
+            f"/api/v1/model-versions/{version_id}/promote",
+            {"target_environment": target_environment},
+        )
 
 
 class EvaluationsResource(_ResourceBase):
-    def run(self, workload_id: str, version: str, policy: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload = {"version": version}
+    def run(
+        self, workload_id: str, version: str, policy: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"version": version}
         if policy:
             payload["policy"] = policy
         return self._client._post(f"/api/v1/workloads/{workload_id}/evaluations", payload)
 
 
 class DeploymentsResource(_ResourceBase):
-    def create(self, workload_id: str, version: str, environment: str = "staging", strategy: str = "blue_green") -> dict[str, Any]:
+    def create(
+        self,
+        workload_id: str,
+        version: str,
+        environment: str = "staging",
+        strategy: str = "blue_green",
+    ) -> dict[str, Any]:
         return self._client._post(
             f"/api/v1/workloads/{workload_id}/deployments",
             {"version": version, "environment": environment, "strategy": strategy},
@@ -59,14 +77,18 @@ class DeploymentsResource(_ResourceBase):
 
 
 class KnowledgeResource(_ResourceBase):
-    def ingest(self, kb_id: str, title: str, content: str, source_uri: str = "sdk_upload") -> dict[str, Any]:
+    def ingest(
+        self, kb_id: str, title: str, content: str, source_uri: str = "sdk_upload"
+    ) -> dict[str, Any]:
         return self._client._post(
             f"/api/v1/knowledge-bases/{kb_id}/documents",
             {"title": title, "content": content, "source_uri": source_uri},
         )
 
     def query(self, kb_id: str, query: str, top_k: int = 4) -> dict[str, Any]:
-        return self._client._post(f"/api/v1/knowledge-bases/{kb_id}/query", {"query": query, "top_k": top_k})
+        return self._client._post(
+            f"/api/v1/knowledge-bases/{kb_id}/query", {"query": query, "top_k": top_k}
+        )
 
 
 class AgentsResource(_ResourceBase):
@@ -94,7 +116,12 @@ class CostsResource(_ResourceBase):
 class NuvorixClient:
     """Nuvorix Python SDK Client."""
 
-    def __init__(self, base_url: str = "http://localhost:8000", api_key: str | None = None, role: str = "admin"):
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8000",
+        api_key: str | None = None,
+        role: str = "admin",
+    ):
         self.base_url = base_url.rstrip("/")
         self.headers = {"Content-Type": "application/json", "X-User-Role": role}
         if api_key:

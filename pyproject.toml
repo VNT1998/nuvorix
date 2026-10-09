@@ -3,7 +3,7 @@ name = "nuvorix"
 version = "0.1.0"
 description = "Nuvorix — AI/ML Production Platform"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
@@ -27,6 +27,7 @@ dependencies = [
     "fastembed>=0.9.0",
     "pgvector>=0.5.0",
     "opentelemetry-exporter-otlp-proto-http>=1.26.0",
+    "alembic>=1.13.0",
 ]
 
 [project.scripts]
@@ -36,7 +37,10 @@ nuvorix = "nuvorix_cli.cli:cli"
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "ruff>=0.4.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+    "types-requests>=2.31.0",
 ]
 
 [build-system]
@@ -60,8 +64,26 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "S", "C4", "PT", "RUF"]
 ignore = [
     "B008",    # FastAPI Depends in function arguments
     "BLE001",  # Broad exception catches
     "RUF012",  # Mutable class attributes
+    "E501",    # Line length handled by formatter
+    "SIM105",  # contextlib.suppress
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"apps/api/tests/*" = ["S101", "S105", "S106", "PT018", "PT011", "PT012"]
+"apps/api/app/core/config.py" = ["S105"]
+"packages/cli/*" = ["S101"]
+"packages/sdk-python/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+explicit_package_bases = true
+warn_return_any = false
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true

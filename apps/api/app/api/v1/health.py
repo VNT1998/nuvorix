@@ -65,5 +65,5 @@ async def metrics():
 async def get_telemetry_traces():
     """Retrieve live distributed trace spans recorded by OpenTelemetry."""
     from apps.api.app.core.telemetry import get_recent_spans
-    return {"spans": get_recent_spans(), "count": len(get_recent_spans())}
 
+    return {"spans": get_recent_spans(), "count": len(get_recent_spans())}

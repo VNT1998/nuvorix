@@ -83,19 +83,25 @@ def list_workloads(ctx):
         r = client.get("/api/v1/workloads")
         r.raise_for_status()
         for w in r.json():
-            click.echo(f"[{w['id']}] {w['name']} (Type: {w['type']}, Active Version: {w.get('active_version', 'none')})")
+            click.echo(
+                f"[{w['id']}] {w['name']} (Type: {w['type']}, Active Version: {w.get('active_version', 'none')})"
+            )
 
 
 @workload.command("create")
 @click.argument("project_id")
 @click.argument("name")
-@click.option("--type", "-t", default="agent", type=click.Choice(["ml_model", "rag", "agent", "llm_service"]))
+@click.option(
+    "--type", "-t", default="agent", type=click.Choice(["ml_model", "rag", "agent", "llm_service"])
+)
 @click.pass_context
 def create_workload(ctx, project_id, name, type):
     """Create a workload under a project."""
     base_url = ctx.obj["BASE_URL"]
     with get_client(base_url) as client:
-        r = client.post(f"/api/v1/projects/{project_id}/workloads", json={"name": name, "type": type})
+        r = client.post(
+            f"/api/v1/projects/{project_id}/workloads", json={"name": name, "type": type}
+        )
         r.raise_for_status()
         w = r.json()
         click.echo(f"Created workload: [{w['id']}] {w['name']} ({w['type']})")
@@ -142,9 +148,13 @@ def deploy(ctx, workload_id, version, env, strategy):
             )
             r.raise_for_status()
             d = r.json()
-            click.echo(f"Deployment [{d['id']}] successfully launched with {d['traffic_percentage']}% traffic.")
+            click.echo(
+                f"Deployment [{d['id']}] successfully launched with {d['traffic_percentage']}% traffic."
+            )
         except httpx.HTTPStatusError as err:
-            click.echo(f"Deployment blocked: {err.response.json().get('detail', str(err))}", err=True)
+            click.echo(
+                f"Deployment blocked: {err.response.json().get('detail', str(err))}", err=True
+            )
             sys.exit(1)
 
 

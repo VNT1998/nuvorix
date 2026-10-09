@@ -200,6 +200,60 @@ class ApiClient {
     });
   }
 
+  async streamGatewayChat(
+    workloadId: string,
+    prompt: string,
+    provider: string,
+    model: string,
+    onChunk: (token: string) => void,
+    onComplete?: (meta: any) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const res = await fetch(`/api/v1/workloads/${workloadId}/gateway/chat/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-Role": this.role,
+      },
+      body: JSON.stringify({ prompt, provider, model }),
+      signal,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Streaming failed with status: ${res.status}`);
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("Streaming response body is unavailable");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.token) {
+              onChunk(data.token);
+            }
+            if (data.done && onComplete) {
+              onComplete(data);
+            }
+          } catch (_) {
+            // ignore non-json keepalives
+          }
+        }
+      }
+    }
+  }
+
   async getCosts(): Promise<CostSummary> {
     return this.request<CostSummary>("/api/v1/costs");
   }

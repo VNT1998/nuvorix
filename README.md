@@ -1,6 +1,9 @@
 # Nuvorix — AI/ML Production Platform
 
 <p align="center">
+  <a href="https://github.com/VNT1998/nuvorix/actions/workflows/ci.yml">
+    <img src="https://github.com/VNT1998/nuvorix/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI Status" />
+  </a>
   <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12" />
   <img src="https://img.shields.io/badge/uv-Package%20Manager-DE5FE9?style=for-the-badge&logo=astral&logoColor=white" alt="uv" />
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
@@ -8,11 +11,44 @@
   <img src="https://img.shields.io/badge/Vite-6+-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
   <img src="https://img.shields.io/badge/Tailwind_CSS-v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind" />
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
-  <img src="https://img.shields.io/badge/Kubernetes-kind-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white" alt="Kubernetes" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="MIT License" />
 </p>
 
 > **A self-service platform for building, evaluating, deploying, governing, and operating ML and LLM workloads.**
+> Built with strict architectural invariants, automated release quality gates, LangGraph stateful agent orchestration, and full-stack observability.
+
+---
+
+## ⚡ Quickstart (Under 5 Minutes)
+
+```bash
+# 1. Clone repository
+git clone https://github.com/VNT1998/nuvorix.git
+cd nuvorix
+
+# 2. Bootstrap all backend and frontend dependencies
+make install
+
+# 3. Verify entire repository quality gate (Lint, Format, Mypy, Vitest, Pytest with Coverage, and Vite Build)
+make check
+
+# 4. Launch full platform stack via Docker Compose
+make docker-up
+```
+- **Web Console**: [http://localhost:5173](http://localhost:5173)
+- **Control Plane API & Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
+- **Prometheus Metrics**: [http://localhost:8000/metrics](http://localhost:8000/metrics)
+
+---
+
+## 📚 Architectural Specifications & Decision Records
+
+Detailed systems design and rationale are documented under `docs/`:
+- **[System Architecture & Invariants](docs/architecture.md)**: Deep dive into the layered architecture, security boundaries, and telemetry pipeline.
+- **[ADR 0001: Hybrid LLM Provider Gateway and FinOps](docs/adr/0001-hybrid-llm-routing.md)**
+- **[ADR 0002: LangGraph State Machine for Multi-Tenant Tool Orchestration](docs/adr/0002-stateful-agent-orchestration.md)**
+- **[ADR 0003: Strict Pre-Release Empirical Evaluation Gates](docs/adr/0003-quality-gate-invariant.md)**
 
 ---
 

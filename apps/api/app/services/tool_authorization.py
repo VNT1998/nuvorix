@@ -61,8 +61,14 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "deployment_id": {"type": "string", "description": "Target deployment ID to trip circuit on"},
-                "reason": {"type": "string", "description": "Operational reason for tripping breaker"},
+                "deployment_id": {
+                    "type": "string",
+                    "description": "Target deployment ID to trip circuit on",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Operational reason for tripping breaker",
+                },
             },
             "required": ["deployment_id"],
         },

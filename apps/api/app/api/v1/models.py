@@ -30,7 +30,11 @@ async def _verify_workload_org(db: AsyncSession, workload_id: str, org_id: str) 
     return workload
 
 
-@router.post("/workloads/{workload_id}/models", response_model=ModelResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/workloads/{workload_id}/models",
+    response_model=ModelResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_model(
     workload_id: str,
     payload: ModelCreate,
@@ -81,7 +85,7 @@ async def train_model(
         )
         return TrainModelResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/models/{model_id}/versions", response_model=list[ModelVersionResponse])
@@ -147,7 +151,7 @@ async def promote_model_version(
         )
         return res
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/workloads/{workload_id}/mlflow-runs")

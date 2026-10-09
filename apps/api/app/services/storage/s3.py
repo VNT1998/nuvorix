@@ -42,11 +42,11 @@ class S3CompatibleStorage(StorageBackend):
                     kwargs["aws_secret_access_key"] = self.secret_access_key
 
                 self._s3_client = boto3.client("s3", **kwargs)
-            except ImportError:
+            except ImportError as err:
                 raise RuntimeError(
                     "boto3 package required for S3CompatibleStorage in production. "
                     "Install with `uv add boto3` or configure local storage."
-                )
+                ) from err
         return self._s3_client
 
     async def upload(
@@ -80,7 +80,9 @@ class S3CompatibleStorage(StorageBackend):
             resp = client.get_object(Bucket=self.bucket_name, Key=key)
             return resp["Body"].read()
         except Exception as e:
-            raise FileNotFoundError(f"S3 object '{key}' not found in bucket '{self.bucket_name}': {e}")
+            raise FileNotFoundError(
+                f"S3 object '{key}' not found in bucket '{self.bucket_name}': {e}"
+            ) from e
 
     async def exists(self, key: str) -> bool:
         client = self._get_client()

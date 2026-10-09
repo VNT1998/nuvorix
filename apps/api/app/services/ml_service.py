@@ -12,10 +12,10 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
-
 from apps.api.app.core.config import settings
 from apps.api.app.models.entities import AuditEvent, Model, ModelVersion, Workload
+
+logger = logging.getLogger(__name__)
 
 
 class MLPlatformService:
@@ -32,7 +32,7 @@ class MLPlatformService:
         weights = np.array([2.5, -1.2, 0.8, 3.4, -0.5])
         noise = np.random.normal(0, 0.5, size=n_samples)
         y = np.dot(X, weights) + 4.2 + noise
-        
+
         split = int(n_samples * 0.8)
         return X[:split], y[:split], X[split:], y[split:]
 
@@ -55,7 +55,9 @@ class MLPlatformService:
             raise ValueError(f"Workload with id '{workload_id}' not found.")
 
         # 2. Get or create Model entity
-        res_m = await db.execute(select(Model).where(Model.workload_id == workload_id, Model.name == model_name))
+        res_m = await db.execute(
+            select(Model).where(Model.workload_id == workload_id, Model.name == model_name)
+        )
         model_entity = res_m.scalar_one_or_none()
         if not model_entity:
             model_entity = Model(
@@ -139,7 +141,11 @@ class MLPlatformService:
                     name=model_name,
                     source=f"{mlflow_artifact_uri}/model",
                     run_id=mlflow_run_id,
-                    tags={"version": version_str, "workload_id": workload_id, "stage": "registered"},
+                    tags={
+                        "version": version_str,
+                        "workload_id": workload_id,
+                        "stage": "registered",
+                    },
                 )
                 mlflow_model_version = mv.version
             except Exception as e:
@@ -169,7 +175,12 @@ class MLPlatformService:
             action="models:train",
             resource_type="model_version",
             resource_id=version_entity.id,
-            metadata_json={"model": model_name, "version": version_str, "metrics": metrics, "mlflow_run_id": mlflow_run_id},
+            metadata_json={
+                "model": model_name,
+                "version": version_str,
+                "metrics": metrics,
+                "mlflow_run_id": mlflow_run_id,
+            },
         )
         db.add(audit)
         await db.commit()
@@ -203,7 +214,7 @@ class MLPlatformService:
             raise ValueError(f"Version with id '{version_id}' not found.")
 
         version_entity.status = target_env
-        
+
         # update workload active version if production
         res_m = await db.execute(select(Model).where(Model.id == version_entity.model_id))
         model = res_m.scalar_one()
@@ -228,7 +239,6 @@ class MLPlatformService:
                         client.set_registered_model_alias(model.name, "staging", str(mlflow_mv))
             except Exception as e:
                 logger.warning("MLflow Model Registry transition fallback: %s", e)
-
 
         audit = AuditEvent(
             organization_id="org-demo-nuvorix",
@@ -262,21 +272,23 @@ class MLPlatformService:
                 return []
             results = []
             for _, r in runs.iterrows():
-                results.append({
-                    "run_id": r.get("run_id"),
-                    "status": r.get("status"),
-                    "start_time": str(r.get("start_time")),
-                    "metrics": {
-                        col.replace("metrics.", ""): r[col]
-                        for col in runs.columns
-                        if col.startswith("metrics.") and not np.isnan(r[col])
-                    },
-                    "params": {
-                        col.replace("params.", ""): r[col]
-                        for col in runs.columns
-                        if col.startswith("params.")
-                    },
-                })
+                results.append(
+                    {
+                        "run_id": r.get("run_id"),
+                        "status": r.get("status"),
+                        "start_time": str(r.get("start_time")),
+                        "metrics": {
+                            col.replace("metrics.", ""): r[col]
+                            for col in runs.columns
+                            if col.startswith("metrics.") and not np.isnan(r[col])
+                        },
+                        "params": {
+                            col.replace("params.", ""): r[col]
+                            for col in runs.columns
+                            if col.startswith("params.")
+                        },
+                    }
+                )
             return results
         except Exception as e:
             logger.warning("MLflow search runs fallback: %s", e)
@@ -290,17 +302,22 @@ class MLPlatformService:
             reg_models = client.search_registered_models()
             results = []
             for m in reg_models:
-                results.append({
-                    "name": m.name,
-                    "versions_count": len(m.latest_versions),
-                    "latest_versions": [
-                        {"version": v.version, "stage": getattr(v, "current_stage", "none"), "run_id": v.run_id}
-                        for v in m.latest_versions
-                    ],
-                    "aliases": dict(m.aliases) if hasattr(m, "aliases") and m.aliases else {},
-                })
+                results.append(
+                    {
+                        "name": m.name,
+                        "versions_count": len(m.latest_versions),
+                        "latest_versions": [
+                            {
+                                "version": v.version,
+                                "stage": getattr(v, "current_stage", "none"),
+                                "run_id": v.run_id,
+                            }
+                            for v in m.latest_versions
+                        ],
+                        "aliases": dict(m.aliases) if hasattr(m, "aliases") and m.aliases else {},
+                    }
+                )
             return results
         except Exception as e:
             logger.warning("MLflow search registered models fallback: %s", e)
             return []
-

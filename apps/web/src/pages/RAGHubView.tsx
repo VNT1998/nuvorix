@@ -28,18 +28,18 @@ export const RAGHubView: React.FC<RAGHubViewProps> = ({
   const [queryResults, setQueryResults] = useState<RetrievalChunk[]>([]);
   const [searching, setSearching] = useState(false);
 
-  useEffect(() => {
-    if (selectedKBId) {
-      loadDocuments(selectedKBId);
-    }
-  }, [selectedKBId]);
-
   const loadDocuments = async (kbId: string) => {
     try {
       const docs = await api.getDocuments(kbId);
       setDocuments(docs);
     } catch (_) {}
   };
+
+  useEffect(() => {
+    if (selectedKBId) {
+      loadDocuments(selectedKBId);
+    }
+  }, [selectedKBId]);
 
   const handleIngest = async (e: React.FormEvent) => {
     e.preventDefault();

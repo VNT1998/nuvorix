@@ -1,7 +1,10 @@
+import asyncio
+import json
 import logging
 import os
 import time
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -25,7 +28,9 @@ PRICING_TABLE = {
 
 def calculate_token_cost(provider: str, model: str, input_tokens: int, output_tokens: int) -> float:
     rates = PRICING_TABLE.get(provider, PRICING_TABLE["local"])
-    cost = (input_tokens / 1000.0) * rates["input_per_1k"] + (output_tokens / 1000.0) * rates["output_per_1k"]
+    cost = (input_tokens / 1000.0) * rates["input_per_1k"] + (output_tokens / 1000.0) * rates[
+        "output_per_1k"
+    ]
     return round(cost, 6)
 
 
@@ -58,11 +63,23 @@ class BaseLLMProvider(ABC):
     ) -> tuple[str, int, int, str]:
         """Returns tuple of (completion_text, input_tokens, output_tokens, usage_source)."""
 
+    @abstractmethod
+    def stream_generate(
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[str, None]:
+        """Yields completion chunks as they are generated."""
+
 
 class OpenAICompatibleProvider(BaseLLMProvider):
     """Real HTTP client supporting any OpenAI-compatible API (OpenAI, Groq, Ollama, vLLM)."""
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout_sec: float = 8.0):
+    def __init__(
+        self, base_url: str | None = None, api_key: str | None = None, timeout_sec: float = 8.0
+    ):
         self.base_url = (
             base_url
             or os.environ.get("OPENAI_BASE_URL")
@@ -79,7 +96,11 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> tuple[str, int, int, str]:
-        if not self.api_key and "localhost" not in self.base_url and "127.0.0.1" not in self.base_url:
+        if (
+            not self.api_key
+            and "localhost" not in self.base_url
+            and "127.0.0.1" not in self.base_url
+        ):
             raise ValueError("No API key configured for remote provider.")
 
         headers = {
@@ -94,7 +115,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(f"{self.base_url.rstrip('/')}/chat/completions", headers=headers, json=payload)
+            resp = await client.post(
+                f"{self.base_url.rstrip('/')}/chat/completions", headers=headers, json=payload
+            )
             resp.raise_for_status()
             data = resp.json()
             choice = data["choices"][0]
@@ -105,6 +128,19 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             out_tok = usage.get("completion_tokens", max(len(text) // 4, 1))
             usage_source = "provider" if has_provider_usage else "estimated"
             return text, in_tok, out_tok, usage_source
+
+    async def stream_generate(
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[str, None]:
+        text, _, _, _ = await self.generate(model, prompt, max_tokens, temperature)
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            yield word + (" " if i < len(words) - 1 else "")
+            await asyncio.sleep(0.01)
 
 
 class LocalDeterministicProvider(BaseLLMProvider):
@@ -138,6 +174,19 @@ class LocalDeterministicProvider(BaseLLMProvider):
         output_tokens = max(len(text.split()) * 2, 1)
         return text, input_tokens, output_tokens, "estimated"
 
+    async def stream_generate(
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[str, None]:
+        text, _, _, _ = await self.generate(model, prompt, max_tokens, temperature)
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            yield word + (" " if i < len(words) - 1 else "")
+            await asyncio.sleep(0.01)
+
 
 class LLMGatewayService:
     _remote_provider: BaseLLMProvider = OpenAICompatibleProvider()
@@ -167,7 +216,12 @@ class LLMGatewayService:
 
         if provider in ["openai", "anthropic", "gemini", "ollama"]:
             try:
-                response_text, input_tokens, output_tokens, usage_source = await cls._remote_provider.generate(
+                (
+                    response_text,
+                    input_tokens,
+                    output_tokens,
+                    usage_source,
+                ) = await cls._remote_provider.generate(
                     model=model,
                     prompt=prompt,
                     max_tokens=max_tokens,
@@ -178,16 +232,29 @@ class LLMGatewayService:
                 from apps.api.app.core.config import settings
 
                 if settings.ENVIRONMENT.lower() == "production":
-                    logger.error("Remote provider '%s' failed in production: %s. Silent fallback is prohibited.", provider, e)
+                    logger.error(
+                        "Remote provider '%s' failed in production: %s. Silent fallback is prohibited.",
+                        provider,
+                        e,
+                    )
                     raise ValueError(
                         f"Remote LLM provider '{provider}' request failed: {e}. "
                         "Fallback to deterministic local demo provider is disabled in production."
-                    )
-                logger.warning("Remote provider '%s' failed or unconfigured (%s). Falling back to local demo provider.", provider, e)
+                    ) from e
+                logger.warning(
+                    "Remote provider '%s' failed or unconfigured (%s). Falling back to local demo provider.",
+                    provider,
+                    e,
+                )
                 status = "fallback"
                 fallback_reason = str(e)
                 actual_provider = "local_demo_provider"
-                response_text, input_tokens, output_tokens, usage_source = await cls._local_provider.generate(
+                (
+                    response_text,
+                    input_tokens,
+                    output_tokens,
+                    usage_source,
+                ) = await cls._local_provider.generate(
                     model=f"local-{model}",
                     prompt=prompt,
                     max_tokens=max_tokens,
@@ -195,7 +262,12 @@ class LLMGatewayService:
                 )
         else:
             actual_provider = "local_demo_provider"
-            response_text, input_tokens, output_tokens, usage_source = await cls._local_provider.generate(
+            (
+                response_text,
+                input_tokens,
+                output_tokens,
+                usage_source,
+            ) = await cls._local_provider.generate(
                 model=model,
                 prompt=prompt,
                 max_tokens=max_tokens,
@@ -204,7 +276,15 @@ class LLMGatewayService:
 
         latency_ms = round((time.time() - start_time) * 1000, 2)
         cost = calculate_token_cost(provider, model, input_tokens, output_tokens)
-        cost_mode = "provider_reported" if (status == "success" and actual_provider == "openai_compatible" and usage_source == "provider") else "estimated_local"
+        cost_mode = (
+            "provider_reported"
+            if (
+                status == "success"
+                and actual_provider == "openai_compatible"
+                and usage_source == "provider"
+            )
+            else "estimated_local"
+        )
 
         # Log into Database
         log_entry = LLMUsageLog(
@@ -255,9 +335,10 @@ class LLMGatewayService:
             "fallback_reason": fallback_reason,
         }
 
-
     @classmethod
-    async def get_cost_summary(cls, db: AsyncSession, workload_id: str | None = None) -> dict[str, Any]:
+    async def get_cost_summary(
+        cls, db: AsyncSession, workload_id: str | None = None
+    ) -> dict[str, Any]:
         query = select(LLMUsageLog)
         if workload_id:
             query = query.where(LLMUsageLog.workload_id == workload_id)
@@ -291,3 +372,72 @@ class LLMGatewayService:
             "breakdown_by_provider": by_provider,
             "breakdown_by_workload": by_workload,
         }
+
+    @classmethod
+    async def stream_chat_completion(
+        cls,
+        db: AsyncSession,
+        workload_id: str,
+        prompt: str,
+        provider: str = "local",
+        model: str = "llama-3-8b-instruct",
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[str, None]:
+        start_time = time.time()
+        full_text: list[str] = []
+
+        chosen_provider = (
+            cls._remote_provider
+            if provider in ["openai", "anthropic", "gemini", "ollama"]
+            else cls._local_provider
+        )
+
+        try:
+            async for chunk in chosen_provider.stream_generate(
+                model=model,
+                prompt=prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            ):
+                full_text.append(chunk)
+                yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
+        except Exception as e:
+            from apps.api.app.core.config import settings
+
+            if settings.ENVIRONMENT.lower() == "production":
+                yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+                return
+            async for chunk in cls._local_provider.stream_generate(
+                model=f"local-{model}",
+                prompt=prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            ):
+                full_text.append(chunk)
+                yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
+
+        latency_ms = round((time.time() - start_time) * 1000, 2)
+        assembled = "".join(full_text)
+        in_tok = max(len(prompt.split()) * 2, 1)
+        out_tok = max(len(assembled.split()) * 2, 1)
+        cost = calculate_token_cost(provider, model, in_tok, out_tok)
+
+        log_entry = LLMUsageLog(
+            workload_id=workload_id,
+            provider=provider,
+            model=model,
+            prompt=prompt,
+            completion=assembled,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            latency_ms=latency_ms,
+            estimated_cost=cost,
+            cost_mode="estimated_local",
+            usage_source="estimated",
+            status="success",
+        )
+        db.add(log_entry)
+        await db.commit()
+
+        yield f"data: {json.dumps({'token': '', 'done': True, 'cost': cost, 'latency_ms': latency_ms, 'input_tokens': in_tok, 'output_tokens': out_tok})}\n\n"

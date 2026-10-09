@@ -23,7 +23,7 @@ async def create_project(
     )
     db.add(project)
     await db.flush()
-    
+
     audit = AuditEvent(
         organization_id=user.organization_id,
         user_id=user.user_id,
@@ -44,7 +44,9 @@ async def list_projects(
     user: UserSession = Depends(require_permission("projects:read")),
 ):
     res = await db.execute(
-        select(Project).where(Project.organization_id == user.organization_id).order_by(Project.created_at.desc())
+        select(Project)
+        .where(Project.organization_id == user.organization_id)
+        .order_by(Project.created_at.desc())
     )
     return list(res.scalars().all())
 

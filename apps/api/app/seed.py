@@ -74,8 +74,16 @@ async def seed_demo_data(db: AsyncSession) -> None:
     # 4. Environments
     envs = [
         Environment(id="env-dev", project_id=project.id, name="dev", type="dev", created_at=now),
-        Environment(id="env-staging", project_id=project.id, name="staging", type="staging", created_at=now),
-        Environment(id="env-prod", project_id=project.id, name="production", type="production", created_at=now),
+        Environment(
+            id="env-staging", project_id=project.id, name="staging", type="staging", created_at=now
+        ),
+        Environment(
+            id="env-prod",
+            project_id=project.id,
+            name="production",
+            type="production",
+            created_at=now,
+        ),
     ]
     for env in envs:
         db.add(env)
@@ -130,7 +138,10 @@ async def seed_demo_data(db: AsyncSession) -> None:
     if not os.path.exists(seeded_artifact_path):
         import joblib
         from sklearn.linear_model import Ridge
-        dummy_regressor = Ridge(alpha=1.0).fit([[1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 3.0, 4.0, 5.0, 6.0]], [10.0, 20.0])
+
+        dummy_regressor = Ridge(alpha=1.0).fit(
+            [[1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 3.0, 4.0, 5.0, 6.0]], [10.0, 20.0]
+        )
         joblib.dump(dummy_regressor, seeded_artifact_path)
 
     m_v1 = ModelVersion(
@@ -203,7 +214,11 @@ The rollback shifts 100% of traffic back to the previous stable active deploymen
             content=text,
             embedding=emb,
             embedding_json=emb,
-            metadata_json={"doc_id": doc_id, "title": "Documentation", "model": "BAAI/bge-small-en-v1.5"},
+            metadata_json={
+                "doc_id": doc_id,
+                "title": "Documentation",
+                "model": "BAAI/bge-small-en-v1.5",
+            },
             created_at=now,
         )
         db.add(chunk)
@@ -214,7 +229,13 @@ The rollback shifts 100% of traffic back to the previous stable active deploymen
         workload_id=w_agent.id,
         version="v1.2.0",
         status="completed",
-        metrics_json={"faithfulness": 0.961, "answer_correctness": 0.934, "tool_selection_accuracy": 0.991, "p95_latency_ms": 1320.0, "cost_per_request": 0.006},
+        metrics_json={
+            "faithfulness": 0.961,
+            "answer_correctness": 0.934,
+            "tool_selection_accuracy": 0.991,
+            "p95_latency_ms": 1320.0,
+            "cost_per_request": 0.006,
+        },
         passed=True,
         decision="ALLOW",
         reasons_json=[],
@@ -226,7 +247,13 @@ The rollback shifts 100% of traffic back to the previous stable active deploymen
         workload_id=w_agent.id,
         version="v1.3.0-bad-candidate",
         status="completed",
-        metrics_json={"faithfulness": 0.682, "answer_correctness": 0.710, "tool_selection_accuracy": 0.740, "p95_latency_ms": 3100.0, "cost_per_request": 0.024},
+        metrics_json={
+            "faithfulness": 0.682,
+            "answer_correctness": 0.710,
+            "tool_selection_accuracy": 0.740,
+            "p95_latency_ms": 3100.0,
+            "cost_per_request": 0.024,
+        },
         passed=False,
         decision="BLOCK",
         reasons_json=[

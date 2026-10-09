@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Project,
   Workload,
@@ -12,6 +12,7 @@ import {
 import { api } from "./lib/api";
 import { Navbar } from "./components/Navbar";
 import { Sidebar, NavView } from "./components/Sidebar";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 import { DashboardView } from "./pages/DashboardView";
 import { ProjectsView } from "./pages/ProjectsView";
@@ -57,25 +58,7 @@ export function App() {
 
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadInitialData();
-
-    const onHashChange = () => {
-      const hash = window.location.hash.replace("#", "") as NavView;
-      if (VALID_VIEWS.includes(hash)) {
-        setActiveView(hash);
-      }
-    };
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
-
-  const handleSelectView = (view: NavView) => {
-    setActiveView(view);
-    window.location.hash = view;
-  };
-
-  const loadInitialData = async () => {
+  const loadInitialData = useCallback(async () => {
     try {
       // 1. Health
       try {
@@ -86,8 +69,8 @@ export function App() {
       // 2. Projects
       const projs = await api.getProjects();
       setProjects(projs);
-      if (projs.length > 0 && !selectedProjectId) {
-        setSelectedProjectId(projs[0].id);
+      if (projs.length > 0) {
+        setSelectedProjectId((prev) => prev || projs[0].id);
       }
 
       // 3. Workloads
@@ -120,6 +103,24 @@ export function App() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    loadInitialData();
+
+    const onHashChange = () => {
+      const hash = window.location.hash.replace("#", "") as NavView;
+      if (VALID_VIEWS.includes(hash)) {
+        setActiveView(hash);
+      }
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [loadInitialData]);
+
+  const handleSelectView = (view: NavView) => {
+    setActiveView(view);
+    window.location.hash = view;
   };
 
   const handleRoleChange = (role: string) => {
@@ -206,7 +207,7 @@ export function App() {
               Connecting to Nuvorix Control Plane...
             </div>
           ) : (
-            <>
+            <ErrorBoundary fallbackTitle="View Failed to Render">
               {activeView === "dashboard" && (
                 <DashboardView
                   workloads={workloads}
@@ -286,7 +287,7 @@ export function App() {
               )}
 
               {activeView === "audit" && <AuditTrailView />}
-            </>
+            </ErrorBoundary>
           )}
         </main>
       </div>

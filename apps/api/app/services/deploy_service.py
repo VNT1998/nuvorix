@@ -100,7 +100,9 @@ class DeploymentPlatformService:
         res_w = await db.execute(query_w)
         workload = res_w.scalar_one_or_none()
         if not workload:
-            raise ValueError(f"Workload with id '{workload_id}' not found or unauthorized for organization '{org_id}'.")
+            raise ValueError(
+                f"Workload with id '{workload_id}' not found or unauthorized for organization '{org_id}'."
+            )
 
         res_p = await db.execute(select(Project).where(Project.id == workload.project_id))
         proj = res_p.scalar_one_or_none()
@@ -117,29 +119,39 @@ class DeploymentPlatformService:
         if environment == "production":
             if bypass_gate:
                 if not bypass_reason or not bypass_reason.strip():
-                    raise ValueError("Break-glass production deployment requires an explicit non-empty bypass_reason.")
+                    raise ValueError(
+                        "Break-glass production deployment requires an explicit non-empty bypass_reason."
+                    )
             else:
                 if not latest_eval:
-                    DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
+                    DEPLOYMENT_TOTAL.labels(
+                        environment=environment, strategy=strategy, status="blocked"
+                    ).inc()
                     raise ValueError(
                         f"Production deployment requires a completed evaluation with decision 'ALLOW' for version '{version}', "
                         "but no evaluation exists."
                     )
                 if latest_eval.status != "completed":
-                    DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
+                    DEPLOYMENT_TOTAL.labels(
+                        environment=environment, strategy=strategy, status="blocked"
+                    ).inc()
                     raise ValueError(
                         f"Production deployment requires a completed evaluation for version '{version}', "
                         f"but evaluation status is '{latest_eval.status}'."
                     )
                 if latest_eval.decision != "ALLOW":
-                    DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
+                    DEPLOYMENT_TOTAL.labels(
+                        environment=environment, strategy=strategy, status="blocked"
+                    ).inc()
                     raise ValueError(
                         f"Production deployment gate BLOCKED version '{version}': "
                         f"decision is '{latest_eval.decision}' ({'; '.join(latest_eval.reasons_json or [])})."
                     )
         else:
             if not bypass_gate and latest_eval and latest_eval.decision == "BLOCK":
-                DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="blocked").inc()
+                DEPLOYMENT_TOTAL.labels(
+                    environment=environment, strategy=strategy, status="blocked"
+                ).inc()
                 raise ValueError(
                     f"Release Policy Gate BLOCKED version '{version}': "
                     f"{'; '.join(latest_eval.reasons_json or [])}"
@@ -179,7 +191,11 @@ class DeploymentPlatformService:
         DEPLOYMENT_TOTAL.labels(environment=environment, strategy=strategy, status="active").inc()
 
         action_name = "deployments:break_glass_create" if bypass_gate else "deployments:create"
-        meta_json = {"version": version, "environment": environment, "strategy": strategy}
+        meta_json: dict[str, Any] = {
+            "version": version,
+            "environment": environment,
+            "strategy": strategy,
+        }
         if bypass_gate:
             meta_json["bypass_gate"] = True
             meta_json["bypass_reason"] = bypass_reason
@@ -204,7 +220,11 @@ class DeploymentPlatformService:
                 organization_id=audit_org,
                 endpoint=endpoint_name,
                 response_code=201,
-                response_json={"deployment_id": dep.id, "version": dep.version, "status": dep.status},
+                response_json={
+                    "deployment_id": dep.id,
+                    "version": dep.version,
+                    "status": dep.status,
+                },
             )
             db.add(idem_record)
 
@@ -277,7 +297,9 @@ class DeploymentPlatformService:
         res = await db.execute(query)
         target_dep = res.scalar_one_or_none()
         if not target_dep:
-            raise ValueError(f"Deployment with id '{deployment_id}' not found or unauthorized for organization '{org_id}'.")
+            raise ValueError(
+                f"Deployment with id '{deployment_id}' not found or unauthorized for organization '{org_id}'."
+            )
 
         # Find project organization
         res_p = await db.execute(

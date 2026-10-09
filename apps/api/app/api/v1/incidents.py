@@ -18,7 +18,9 @@ async def list_project_incidents(
     user: UserSession = Depends(require_permission("projects:read")),
 ):
     res_p = await db.execute(
-        select(Project).where(Project.id == project_id, Project.organization_id == user.organization_id)
+        select(Project).where(
+            Project.id == project_id, Project.organization_id == user.organization_id
+        )
     )
     if not res_p.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Project not found")
@@ -83,4 +85,4 @@ async def remediate_incident(
         )
         return res
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e

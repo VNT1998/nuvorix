@@ -34,7 +34,11 @@ async def test_retrieval_ranking_and_scores():
     """Verify cosine similarity score semantics and ranking correctness."""
     uid = uuid.uuid4().hex[:8]
     async with AsyncSessionLocal() as session:
-        proj = Project(id=f"proj-rag-test-{uid}", organization_id=f"org-rag-test-{uid}", name="RAG Eval Project")
+        proj = Project(
+            id=f"proj-rag-test-{uid}",
+            organization_id=f"org-rag-test-{uid}",
+            name="RAG Eval Project",
+        )
         session.add(proj)
         await session.flush()
 
@@ -110,7 +114,9 @@ async def test_min_score_threshold_filtering():
     """Verify that results below min_score are strictly excluded."""
     uid = uuid.uuid4().hex[:8]
     async with AsyncSessionLocal() as session:
-        proj = Project(id=f"proj-filter-{uid}", organization_id=f"org-filter-{uid}", name="Filter Project")
+        proj = Project(
+            id=f"proj-filter-{uid}", organization_id=f"org-filter-{uid}", name="Filter Project"
+        )
         session.add(proj)
         await session.flush()
 
@@ -151,7 +157,9 @@ async def test_multi_tenant_rag_isolation():
     """Verify that querying a knowledge base with wrong org_id returns empty or raises ValueError."""
     uid = uuid.uuid4().hex[:8]
     async with AsyncSessionLocal() as session:
-        proj_owner = Project(id=f"proj-owner-{uid}", organization_id=f"org-owner-{uid}", name="Owner Project")
+        proj_owner = Project(
+            id=f"proj-owner-{uid}", organization_id=f"org-owner-{uid}", name="Owner Project"
+        )
         session.add(proj_owner)
         await session.flush()
 

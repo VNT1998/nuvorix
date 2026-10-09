@@ -96,9 +96,13 @@ class RAGPlatformService:
         org_id: str | None = None,
     ) -> KnowledgeDocument:
         if not org_id:
-            raise ValueError("Mandatory tenant context missing: org_id is required for document ingestion.")
+            raise ValueError(
+                "Mandatory tenant context missing: org_id is required for document ingestion."
+            )
         if not user_id:
-            raise ValueError("Mandatory user context missing: user_id is required for document ingestion.")
+            raise ValueError(
+                "Mandatory user context missing: user_id is required for document ingestion."
+            )
 
         # 1. Verify knowledge base exists and belongs to the caller's organization
         query = (
@@ -109,7 +113,9 @@ class RAGPlatformService:
         res_kb = await db.execute(query)
         kb = res_kb.scalar_one_or_none()
         if not kb:
-            raise ValueError(f"Knowledge base with id '{knowledge_base_id}' not found or unauthorized for organization '{org_id}'.")
+            raise ValueError(
+                f"Knowledge base with id '{knowledge_base_id}' not found or unauthorized for organization '{org_id}'."
+            )
 
         res_p = await db.execute(select(Project).where(Project.id == kb.project_id))
         proj = res_p.scalar_one_or_none()
@@ -159,7 +165,11 @@ class RAGPlatformService:
             action="knowledge:ingest",
             resource_type="document",
             resource_id=doc.id,
-            metadata_json={"title": title, "chunks": len(chunk_entities), "embedding_model": cls.EMBEDDING_MODEL_NAME},
+            metadata_json={
+                "title": title,
+                "chunks": len(chunk_entities),
+                "embedding_model": cls.EMBEDDING_MODEL_NAME,
+            },
         )
         db.add(audit)
         await db.commit()
@@ -185,7 +195,9 @@ class RAGPlatformService:
         """
         # Tenant ownership validation
         if not org_id:
-            raise ValueError("Mandatory tenant context missing: org_id is required for knowledge queries.")
+            raise ValueError(
+                "Mandatory tenant context missing: org_id is required for knowledge queries."
+            )
 
         res_kb = await db.execute(
             select(KnowledgeBase)
@@ -193,11 +205,20 @@ class RAGPlatformService:
             .where(KnowledgeBase.id == knowledge_base_id, Project.organization_id == org_id)
         )
         if not res_kb.scalar_one_or_none():
-            raise ValueError(f"Knowledge base '{knowledge_base_id}' not found or unauthorized for organization '{org_id}'.")
+            raise ValueError(
+                f"Knowledge base '{knowledge_base_id}' not found or unauthorized for organization '{org_id}'."
+            )
 
-        with trace_span("rag.vector_retrieval", {"knowledge_base_id": knowledge_base_id, "query_terms": len(query.split()), "top_k": top_k}):
+        with trace_span(
+            "rag.vector_retrieval",
+            {
+                "knowledge_base_id": knowledge_base_id,
+                "query_terms": len(query.split()),
+                "top_k": top_k,
+            },
+        ):
             start_time = time.time()
-            
+
             # 1. Generate real query embedding (unit-normalized)
             query_vec = np.array(cls.generate_embedding(query), dtype=float)
 
@@ -208,7 +229,9 @@ class RAGPlatformService:
                     stmt = (
                         select(
                             KnowledgeChunk,
-                            KnowledgeChunk.embedding.cosine_distance(query_vec.tolist()).label("distance"),
+                            KnowledgeChunk.embedding.cosine_distance(query_vec.tolist()).label(
+                                "distance"
+                            ),
                         )
                         .where(KnowledgeChunk.knowledge_base_id == knowledge_base_id)
                         .order_by("distance")
@@ -216,24 +239,28 @@ class RAGPlatformService:
                     )
                     res = await db.execute(stmt)
                     rows = res.all()
-                    
+
                     formatted: list[dict[str, Any]] = []
                     for ch, dist in rows:
                         dist_val = float(dist)
                         # Cosine similarity for normalized vectors is (1.0 - distance)
                         sim = max(0.0, min(1.0, 1.0 - dist_val))
                         if sim >= min_score:
-                            formatted.append({
-                                "chunk_id": ch.id,
-                                "document_id": ch.document_id,
-                                "score": round(sim, 4),
-                                "distance": round(dist_val, 4),
-                                "source": ch.metadata_json.get("source", "unknown"),
-                                "title": ch.metadata_json.get("title", "Untitled"),
-                                "text": ch.content,
-                            })
+                            formatted.append(
+                                {
+                                    "chunk_id": ch.id,
+                                    "document_id": ch.document_id,
+                                    "score": round(sim, 4),
+                                    "distance": round(dist_val, 4),
+                                    "source": ch.metadata_json.get("source", "unknown"),
+                                    "title": ch.metadata_json.get("title", "Untitled"),
+                                    "text": ch.content,
+                                }
+                            )
                     duration = time.time() - start_time
-                    RETRIEVAL_LATENCY_SECONDS.labels(knowledge_base_id=knowledge_base_id).observe(duration)
+                    RETRIEVAL_LATENCY_SECONDS.labels(knowledge_base_id=knowledge_base_id).observe(
+                        duration
+                    )
                     return formatted
                 except Exception as ex:
                     logger.debug("pgvector native operator query fell back: %s", ex)
@@ -254,7 +281,7 @@ class RAGPlatformService:
                 dot_sim = float(np.dot(query_vec, chunk_vec))
                 sim = max(0.0, min(1.0, dot_sim))
                 dist = max(0.0, min(1.0, 1.0 - sim))
-                
+
                 if sim >= min_score:
                     scored_results.append((sim, dist, ch))
 
@@ -264,15 +291,17 @@ class RAGPlatformService:
 
             formatted_fallback: list[dict[str, Any]] = []
             for sim, dist, ch in top_results:
-                formatted_fallback.append({
-                    "chunk_id": ch.id,
-                    "document_id": ch.document_id,
-                    "score": round(sim, 4),
-                    "distance": round(dist, 4),
-                    "source": ch.metadata_json.get("source", "unknown"),
-                    "title": ch.metadata_json.get("title", "Untitled"),
-                    "text": ch.content,
-                })
+                formatted_fallback.append(
+                    {
+                        "chunk_id": ch.id,
+                        "document_id": ch.document_id,
+                        "score": round(sim, 4),
+                        "distance": round(dist, 4),
+                        "source": ch.metadata_json.get("source", "unknown"),
+                        "title": ch.metadata_json.get("title", "Untitled"),
+                        "text": ch.content,
+                    }
+                )
 
             duration = time.time() - start_time
             RETRIEVAL_LATENCY_SECONDS.labels(knowledge_base_id=knowledge_base_id).observe(duration)
