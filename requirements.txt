@@ -109,7 +109,7 @@ googleapis-common-protos==1.75.5
     # via opentelemetry-exporter-otlp-proto-http
 graphene==3.4.3
     # via mlflow
-graphql-core==3.2.13
+graphql-core==3.3.0
     # via
     #   graphene
     #   graphql-relay
