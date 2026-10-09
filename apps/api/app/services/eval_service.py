@@ -333,8 +333,15 @@ class EvaluationEngineService:
             answer_correctness = (
                 round(float(np.mean(correctness_scores)), 4) if correctness_scores else 0.0
             )
+            from apps.api.app.services.gateway_service import calculate_token_cost
 
-            cost_val = 0.0032
+            rag_in_tokens = sum(len(case["query"].split()) * 2 for case in RAG_BENCHMARK_CASES)
+            rag_out_tokens = (
+                sum(len(t.split()) for t in retrieved_texts) if retrieved_texts else 120
+            )
+            cost_val = calculate_token_cost(
+                "local", "embedding-retrieval", rag_in_tokens, rag_out_tokens
+            )
             metrics = {
                 "recall_at_3": recall_at_3,
                 "mrr_at_3": mrr_at_3,

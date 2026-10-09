@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     OTEL_ENDPOINT: str = "http://localhost:4317"
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
 
+    # LLM Providers & Inference
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    LOCAL_LLM_URL: str = "http://localhost:11434/v1"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_PRIMARY_MODEL: str = "medgemma:4b"
+    OLLAMA_FALLBACK_MODELS: list[str] = ["qwen2.5:3b", "llama3.2:3b"]
+
     # Artifacts & Local Storage
     ARTIFACT_STORE_PATH: str = "./artifacts"
 

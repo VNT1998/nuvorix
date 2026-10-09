@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
@@ -80,13 +79,15 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     def __init__(
         self, base_url: str | None = None, api_key: str | None = None, timeout_sec: float = 8.0
     ):
+        from apps.api.app.core.config import settings
+
         self.base_url = (
             base_url
-            or os.environ.get("OPENAI_BASE_URL")
-            or os.environ.get("LOCAL_LLM_URL")
+            or settings.OPENAI_BASE_URL
+            or settings.LOCAL_LLM_URL
             or "https://api.openai.com/v1"
         )
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        self.api_key = api_key if api_key is not None else settings.OPENAI_API_KEY
         self.timeout = timeout_sec
 
     async def generate(
@@ -216,18 +217,28 @@ class LLMGatewayService:
 
         if provider in ["openai", "anthropic", "gemini", "ollama"]:
             try:
+                if provider == "ollama":
+                    from apps.api.app.core.config import settings
+
+                    ollama_url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/v1"
+                    remote_provider: BaseLLMProvider = OpenAICompatibleProvider(
+                        base_url=ollama_url, api_key="ollama"
+                    )
+                else:
+                    remote_provider = cls._remote_provider
+
                 (
                     response_text,
                     input_tokens,
                     output_tokens,
                     usage_source,
-                ) = await cls._remote_provider.generate(
+                ) = await remote_provider.generate(
                     model=model,
                     prompt=prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
-                actual_provider = "openai_compatible"
+                actual_provider = "ollama" if provider == "ollama" else "openai_compatible"
             except Exception as e:
                 from apps.api.app.core.config import settings
 
@@ -387,11 +398,17 @@ class LLMGatewayService:
         start_time = time.time()
         full_text: list[str] = []
 
-        chosen_provider = (
-            cls._remote_provider
-            if provider in ["openai", "anthropic", "gemini", "ollama"]
-            else cls._local_provider
-        )
+        if provider == "ollama":
+            from apps.api.app.core.config import settings
+
+            ollama_url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/v1"
+            chosen_provider: BaseLLMProvider = OpenAICompatibleProvider(
+                base_url=ollama_url, api_key="ollama"
+            )
+        elif provider in ["openai", "anthropic", "gemini"]:
+            chosen_provider = cls._remote_provider
+        else:
+            chosen_provider = cls._local_provider
 
         try:
             async for chunk in chosen_provider.stream_generate(
