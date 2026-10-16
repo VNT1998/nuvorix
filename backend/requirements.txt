@@ -218,7 +218,7 @@ multidict==6.9.1
     # via
     #   aiohttp
     #   yarl
-narwhals==2.26.0
+narwhals==2.27.1
     # via scikit-learn
 numpy==2.5.3
     # via
